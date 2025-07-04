@@ -27,7 +27,7 @@ function App() {
 
     return (
         <div style={{ padding: '40px', textAlign: 'center', fontSize: '24px' }}>
-            <h1>MTGA Analyzer Frontend (TypeScript)</h1>
+            <h1>MTGA Analyzer Frontend</h1>
             <p>Message from backend:</p>
             <p style={{ fontWeight: 'bold', color: '#007BFF' }}>
                 {message}

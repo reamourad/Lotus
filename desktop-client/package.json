@@ -1,0 +1,15 @@
+{
+  "name": "Lotus",
+  "version": "0.0.1",
+  "description": "Magic The Gathering Analyzer",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Rea Mourad",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "37.2.0"
+  }
+}
