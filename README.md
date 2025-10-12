@@ -1,0 +1,2 @@
+# Lotus
+MTG Draft Assistant
