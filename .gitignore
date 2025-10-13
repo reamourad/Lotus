@@ -1,0 +1,8 @@
+# === JetBrains (WebStorm, IntelliJ, etc.) ===
+.idea/
+*.iml
+
+# === Logs ===
+logs
+*.log
+*.log.*
