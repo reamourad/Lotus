@@ -1,20 +1,23 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import Header from "@/components/Header";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Wedges - Next.js Template",
+  title: "Lotus Draft Assistant",
   description:
-    "Beautiful UI components for React, crafted with the Wedges design system, Radix UI, and Tailwind CSS.",
+    "Learn how to draft with Lotus",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // 'dark' theme is added here
-    <html lang="en" className="dark wg-antialiased">
-      <body className={inter.className}>{children}</body>
-    </html>
+      <html lang="en" className={`dark h-full`}>
+      <body className="bg-lotus-bg text-white">
+      <Header />
+        <main>{children}</main>
+      </body>
+      </html>
   );
 }

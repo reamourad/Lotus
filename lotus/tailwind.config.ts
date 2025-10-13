@@ -10,8 +10,16 @@ const config: Config = {
     // Include Wedges components
     "node_modules/@lemonsqueezy/wedges/dist/**/*.{js,ts,jsx,tsx}",
   ],
-  theme: {},
+  theme: {
+    extend: {
+      colors: {
+        "lotus-bg": "#121217",
+      },
+    },
+  },
   plugins: [wedgesTW()],
+
+  darkMode: "class"
 };
 
 export default config;
