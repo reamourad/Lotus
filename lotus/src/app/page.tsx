@@ -1,53 +1,144 @@
-import { LemonSqueezy } from "@/components/LemonSqueezy";
-import { ArrowUpRightIcon } from "@iconicicons/react";
-import { Button, Tooltip } from "@lemonsqueezy/wedges";
-import Link from "next/link";
+'use client';
+
+import { useState } from 'react';
+
+interface BoosterResponse {
+  pack: string[];
+  set: string;
+  count: number;
+}
+
+interface ScryfallCard {
+  name: string;
+  image_uris?: {
+    normal: string;
+    small: string;
+  };
+  card_faces?: Array<{
+    image_uris: {
+      normal: string;
+      small: string;
+    };
+  }>;
+}
 
 export default function Home() {
+  const [booster, setBooster] = useState<BoosterResponse | null>(null);
+  const [cards, setCards] = useState<ScryfallCard[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedSet, setSelectedSet] = useState('mh3');
+
+  const fetchBooster = async () => {
+    setLoading(true);
+    setCards([]);
+
+    try {
+      // Fetch booster from your endpoint
+      const response = await fetch(`https://mtgdraftassistant.onrender.com/booster?set=${selectedSet}`);
+      const data: BoosterResponse = await response.json();
+      setBooster(data);
+
+      // Fetch card images from Scryfall with delay to respect rate limits
+      const cardData: ScryfallCard[] = [];
+
+      for (const cardName of data.pack) {
+        try {
+          // Try fuzzy search first, which is more forgiving
+          const scryfallResponse = await fetch(
+            `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}&set=${data.set.toLowerCase()}`
+          );
+
+          if (scryfallResponse.ok) {
+            const card = await scryfallResponse.json();
+            cardData.push(card);
+          } else {
+            console.error(`Failed to fetch ${cardName}:`, scryfallResponse.status);
+          }
+        } catch (error) {
+          console.error(`Error fetching ${cardName}:`, error);
+        }
+      }
+
+      setCards(cardData);
+    } catch (error) {
+      console.error('Error fetching booster:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getCardImage = (card: ScryfallCard) => {
+    if (card.image_uris) {
+      return card.image_uris.normal;
+    }
+    if (card.card_faces && card.card_faces[0]) {
+      return card.card_faces[0].image_uris.normal;
+    }
+    return '';
+  };
+
   return (
-    <main className="flex wg-bg-[rgb(84_35_231)] min-h-screen flex-col items-center justify-center">
-      <div className="container px-10 space-y-10 max-w-4xl py-24">
-        <h1 className="text-5xl font-medium md:text-6xl text-balance text-white text-center">
-          Build faster with Wedges. An open-source collection of UI components for React.
-        </h1>
+    <main className="min-h-screen bg-lotus-bg">
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex flex-col items-center gap-6 mb-8">
+          <h1 className="text-4xl font-bold text-white">MTG Booster Pack</h1>
 
-        <p className="text-lg text-surface-700 leading-relaxed text-balance text-center">
-          An ever-expanding, open-source React UI library built with the Wedges Design System, Radix
-          primitives, and Tailwind CSS.
-        </p>
+          <div className="flex gap-4 items-center">
+            <input
+              type="text"
+              value={selectedSet}
+              onChange={(e) => setSelectedSet(e.target.value.toLowerCase())}
+              placeholder="Set code (e.g., mh3)"
+              className="px-4 py-2 rounded bg-gray-800 text-white border border-gray-600 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              onClick={fetchBooster}
+              disabled={loading}
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded font-semibold transition-colors"
+            >
+              {loading ? 'Opening...' : 'Open Booster'}
+            </button>
+          </div>
 
-        <div className="text-center">
-          <Tooltip content="Stay zesty 🍋" color="secondary">
-            <Button variant="secondary" shape="pill" className="px-6">
-              Start by editing <code className="text-primary-700">app/page.tsx</code>
-            </Button>
-          </Tooltip>
+          {booster && (
+            <p className="text-gray-300">
+              {booster.count} cards from {booster.set.toUpperCase()}
+            </p>
+          )}
         </div>
 
-        <div className="flex justify-center gap-8">
-          <Button asChild variant="link" before={<ArrowUpRightIcon />}>
-            <Link href="https://www.lemonsqueezy.com/wedges/docs" target="_blank">
-              Documentation
-            </Link>
-          </Button>
+        {loading && (
+          <div className="flex justify-center items-center py-20">
+            <div className="text-white text-xl">Loading cards...</div>
+          </div>
+        )}
 
-          <Button asChild variant="link" before={<ArrowUpRightIcon />}>
-            <Link href="https://www.lemonsqueezy.com/wedges/figma" target="_blank">
-              Figma
-            </Link>
-          </Button>
-        </div>
+        {!loading && cards.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {cards.map((card, index) => (
+              <div
+                key={index}
+                className="transform hover:scale-105 transition-transform duration-200 cursor-pointer"
+              >
+                <img
+                  src={getCardImage(card)}
+                  alt={card.name}
+                  className="w-full rounded-lg shadow-lg"
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
-        <div className="flex text-sm text-surface-600 items-center justify-center pt-16 gap-3">
-          <span>Brought to you by </span>
-          <a
-            className="flex items-center gap-2"
-            href="https://www.lemonsqueezy.com"
-            target="_blank"
-          >
-            <LemonSqueezy />
-          </a>
-        </div>
+        {!loading && !booster && (
+          <div className="flex items-center justify-center py-20">
+            <img
+              src="/gradient.png"
+              alt="Logo overlay"
+              className="w-full h-[60vh] object-fill"
+            />
+          </div>
+        )}
       </div>
     </main>
   );

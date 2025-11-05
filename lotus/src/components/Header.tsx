@@ -24,7 +24,7 @@ export default function Header() {
                             Home
                         </Link>
                     </Tabs.Trigger>
-                    <Tabs.Trigger asChild value="play">
+                    <Tabs.Trigger asChild value="/play">
                         <Link href="/" className="px-5 py-3 text-lg font-medium">
                             Play
                         </Link>
