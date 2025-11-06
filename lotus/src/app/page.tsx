@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Header from "@/components/Header";
 
 interface BoosterResponse {
   pack: string[];
@@ -78,8 +79,10 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-lotus-bg">
-      <div className="container mx-auto px-4 py-8">
+    <>
+      <Header activeTab="home" />
+      <main className="min-h-screen bg-lotus-bg">
+        <div className="container mx-auto px-4 py-8">
         <div className="flex flex-col items-center gap-6 mb-8">
           <h1 className="text-4xl font-bold text-white">MTG Booster Pack</h1>
 
@@ -139,7 +142,8 @@ export default function Home() {
             />
           </div>
         )}
-      </div>
-    </main>
+        </div>
+      </main>
+    </>
   );
 }
