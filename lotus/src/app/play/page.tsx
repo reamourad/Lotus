@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from "@/components/Header";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent, DragOverEvent, useDroppable, useDraggable } from '@dnd-kit/core';
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // === CONFIGURATION CONSTANTS ===
 // Default card display width in pixels
@@ -28,6 +31,8 @@ interface Card {
   name: string;
   imageUrl: string;
   id: string; // Unique identifier for picking/keys
+  cmc: number; // Converted mana cost
+  columnId?: number; // Which column the card is assigned to (for manual organization)
 }
 
 interface BoosterData {
@@ -175,6 +180,217 @@ const CardHoverPreview: React.FC<{ card: Card | null; cardPosition: HoverPositio
             }}
           />
         </div>
+    </div>
+  );
+};
+
+// Draggable Card Component for Mana Curve
+const DraggableCard: React.FC<{ card: Card; index: number }> = ({ card, index }) => {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: card.id,
+  });
+
+  // Calculate natural stacking with slight rotation and offset
+  const naturalRotation = (index % 3 - 1) * 2; // Slight rotation between -2 and 2 degrees
+  const naturalOffsetX = (index % 3 - 1) * 3; // Slight horizontal offset
+
+  const style = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 1000 : 'auto',
+      }
+    : {
+        transform: `rotate(${naturalRotation}deg) translateX(${naturalOffsetX}px)`,
+      };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ ...style, width: `${DEFAULT_CARD_WIDTH}px` }}
+      {...attributes}
+      {...listeners}
+      className="rounded-xl overflow-hidden shadow-lg hover:scale-105 cursor-grab active:cursor-grabbing will-change-transform"
+      title={card.name}
+    >
+      <img
+        src={card.imageUrl}
+        alt={card.name}
+        className="w-full h-auto aspect-[2.5/3.5] object-cover pointer-events-none"
+        draggable={false}
+      />
+    </div>
+  );
+};
+
+// Droppable Column Component (Invisible)
+const DroppableColumn: React.FC<{
+  columnId: number;
+  cards: Card[];
+  isOver: boolean;
+}> = ({ columnId, cards, isOver }) => {
+  const { setNodeRef } = useDroppable({
+    id: `column-${columnId}`,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`p-4 ${isOver ? 'bg-purple-900/10' : ''}`}
+      style={{
+        minWidth: `${DEFAULT_CARD_WIDTH + 32}px`,
+        transition: 'background-color 0.2s'
+      }}
+    >
+      <div className="flex flex-col items-center">
+        {/* Column of stacked cards */}
+        <div
+          className="relative w-full flex justify-center"
+          style={{
+            minHeight: cards.length > 0 ? `${(DEFAULT_CARD_WIDTH / CARD_ASPECT_RATIO) + (cards.length - 1) * 30}px` : '250px',
+          }}
+        >
+          {cards.map((card, idx) => (
+            <div
+              key={card.id}
+              className="absolute will-change-transform"
+              style={{
+                top: `${idx * 30}px`,
+                zIndex: idx,
+              }}
+            >
+              <DraggableCard card={card} index={idx} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Mana Curve Display Component
+const ManaCurveDisplay: React.FC<{
+  draftedCards: Card[];
+  onReorder: (newCards: Card[]) => void;
+}> = ({ draftedCards, onReorder }) => {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    })
+  );
+
+  // Get unique CMC values and sort them
+  const uniqueCmcs = Array.from(new Set(draftedCards.map(card => card.cmc))).sort((a, b) => a - b);
+
+  // Map CMC to stack index (dynamic positioning)
+  const cmcToStackIndex: { [key: number]: number } = {};
+  uniqueCmcs.forEach((cmc, index) => {
+    cmcToStackIndex[cmc] = index;
+  });
+
+  // Organize cards by their stack position
+  const cardsByStack: { [key: number]: Card[] } = {};
+  draftedCards.forEach(card => {
+    const stackIndex = cmcToStackIndex[card.cmc];
+    if (!cardsByStack[stackIndex]) {
+      cardsByStack[stackIndex] = [];
+    }
+    cardsByStack[stackIndex].push(card);
+  });
+
+  // Number of visible stacks = number of unique CMCs + 1 (for dropping into new positions)
+  const numVisibleStacks = uniqueCmcs.length + 1;
+
+  // Track which CMC each stack represents (for the drag handler)
+  const stackToCmc: { [key: number]: number | null } = {};
+  uniqueCmcs.forEach((cmc, index) => {
+    stackToCmc[index] = cmc;
+  });
+  stackToCmc[numVisibleStacks - 1] = null; // Last stack is for new cards
+
+  const handleDragStart = (event: DragEndEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    setOverId(event.over?.id as string || null);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    setOverId(null);
+
+    if (!over) return;
+
+    const overId = over.id as string;
+
+    // Check if dropped on a column
+    if (overId.startsWith('column-')) {
+      const targetStackIndex = parseInt(overId.replace('column-', ''));
+      const draggedCard = draftedCards.find(card => card.id === active.id);
+
+      if (!draggedCard) return;
+
+      // Determine the target CMC based on where it was dropped
+      let targetCmc: number;
+
+      if (stackToCmc[targetStackIndex] !== undefined && stackToCmc[targetStackIndex] !== null) {
+        // Dropped on existing stack - use that CMC
+        targetCmc = stackToCmc[targetStackIndex] as number;
+      } else {
+        // Dropped on empty stack at the end - need to determine new CMC
+        // Find the highest CMC and add 1
+        const maxCmc = uniqueCmcs.length > 0 ? Math.max(...uniqueCmcs) : -1;
+        targetCmc = maxCmc + 1;
+      }
+
+      // Update the card's CMC
+      const updatedCards = draftedCards.map(card =>
+        card.id === active.id ? { ...card, cmc: targetCmc } : card
+      );
+      onReorder(updatedCards);
+    }
+  };
+
+  const handleDragCancel = () => {
+    setActiveId(null);
+    setOverId(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-bold text-white">Drafted Cards</h2>
+      {draftedCards.length === 0 ? (
+        <div className="text-gray-400 text-center py-8">
+          No cards drafted yet. Select a card and click CONFIRM PICK to start building your deck.
+        </div>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <div className="flex gap-4 items-start overflow-x-auto pb-4">
+            {Array.from({ length: numVisibleStacks }, (_, i) => i).map(stackId => (
+              <DroppableColumn
+                key={stackId}
+                columnId={stackId}
+                cards={cardsByStack[stackId] || []}
+                isOver={overId === `column-${stackId}`}
+              />
+            ))}
+          </div>
+        </DndContext>
+      )}
     </div>
   );
 };
@@ -335,13 +551,35 @@ export default function PlayPage() {
             throw new Error("Invalid API response: 'pack' array is missing or malformed.");
         }
 
-        const cardsWithIds: Card[] = data.pack.map((cardName: string, index: number) => ({
-            name: cardName,
-            imageUrl: getScryfallImageUrl(cardName),
-            id: `${cardName}-${index}-${Date.now()}`,
-        }));
+        // Fetch card data including mana cost from Scryfall
+        const cardsWithData: Card[] = [];
+        for (const cardName of data.pack) {
+          try {
+            const scryfallResponse = await fetch(
+              `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cardName)}`
+            );
+            if (scryfallResponse.ok) {
+              const cardData = await scryfallResponse.json();
+              cardsWithData.push({
+                name: cardName,
+                imageUrl: getScryfallImageUrl(cardName),
+                id: `${cardName}-${cardsWithData.length}-${Date.now()}`,
+                cmc: cardData.cmc || 0,
+              });
+            }
+          } catch (error) {
+            console.error(`Error fetching card data for ${cardName}:`, error);
+            // Fallback if fetch fails
+            cardsWithData.push({
+              name: cardName,
+              imageUrl: getScryfallImageUrl(cardName),
+              id: `${cardName}-${cardsWithData.length}-${Date.now()}`,
+              cmc: 0,
+            });
+          }
+        }
 
-        setBoosterCards(cardsWithIds);
+        setBoosterCards(cardsWithData);
       } catch (e) {
         console.error("Fetch Error:", e);
         setError(e instanceof Error ? e.message : "An unknown data loading error occurred.");
@@ -512,6 +750,12 @@ export default function PlayPage() {
                 borderWidth: '4px',
                 boxShadow: '0 -8px 16px rgba(234, 179, 8, 0.5), 0 -4px 8px rgba(234, 179, 8, 0.3), 0 -2px 4px rgba(234, 179, 8, 0.2)'
               }}
+            />
+
+            {/* Mana Curve Display */}
+            <ManaCurveDisplay
+              draftedCards={pickedCards}
+              onReorder={setPickedCards}
             />
           </>
         )}
