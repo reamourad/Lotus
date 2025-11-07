@@ -5,7 +5,7 @@ import Header from "@/components/Header";
 
 // === CONFIGURATION CONSTANTS ===
 // Default card display width in pixels
-const DEFAULT_CARD_WIDTH = 200;
+const DEFAULT_CARD_WIDTH = 170;
 const MIN_CARD_WIDTH = 120;
 const MAX_CARD_WIDTH = 350;
 
@@ -62,6 +62,18 @@ const HOVER_PREVIEW_STYLE = `
 }
 .pop-in {
     animation: pop-in 0.3s ease-out forwards;
+}
+
+@keyframes radiate {
+    0%, 100% {
+        box-shadow: 0 -8px 16px rgba(250, 204, 21, 0.6), 0 -4px 8px rgba(250, 204, 21, 0.4), 0 -2px 4px rgba(250, 204, 21, 0.3);
+    }
+    50% {
+        box-shadow: 0 -16px 28px rgba(250, 204, 21, 0.8), 0 -8px 16px rgba(250, 204, 21, 0.6), 0 -4px 8px rgba(250, 204, 21, 0.4);
+    }
+}
+.radiate {
+    animation: radiate 2s ease-in-out infinite;
 }
 
 /* Custom slider styles */
@@ -231,10 +243,10 @@ const BoosterGrid: React.FC<{
 
   return (
     // Outer container ensures centering and max width
-    <div className="flex justify-center mx-auto">
+    <div className="flex justify-start mx-auto">
 
       {/* Flexible container */}
-      <div className="flex flex-wrap justify-center gap-4 p-6 md:p-8">
+      <div className="flex flex-wrap justify-start gap-4 p-6 md:p-8">
         {cards.map(card => (
           <div
             key={card.id}
@@ -494,7 +506,13 @@ export default function PlayPage() {
               </button>
             </div>
 
-            <hr className="my-8 border-gray-700" />
+            <hr
+              className="my-8 border-yellow-500 -mx-4 md:-mx-8"
+              style={{
+                borderWidth: '4px',
+                boxShadow: '0 -8px 16px rgba(234, 179, 8, 0.5), 0 -4px 8px rgba(234, 179, 8, 0.3), 0 -2px 4px rgba(234, 179, 8, 0.2)'
+              }}
+            />
           </>
         )}
       </main>
