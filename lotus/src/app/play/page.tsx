@@ -42,6 +42,20 @@ interface BoosterData {
   count: number;
 }
 
+interface Player {
+  id: number;
+  isHuman: boolean;
+  picks: Card[];
+  currentPack: Card[];
+}
+
+interface DraftState {
+  currentBooster: number; // 1, 2, or 3
+  currentPick: number; // Pick number within the booster
+  players: Player[];
+  direction: 'clockwise' | 'counterclockwise'; // Direction changes each booster
+}
+
 interface HoverPosition {
   x: number;
   y: number;
@@ -185,7 +199,7 @@ const CardHoverPreview: React.FC<{ card: Card | null; cardPosition: HoverPositio
 };
 
 // Draggable Card Component for Mana Curve
-const DraggableCard: React.FC<{ card: Card; index: number }> = ({ card, index }) => {
+const DraggableCard: React.FC<{ card: Card; index: number; cardWidth: number }> = ({ card, index, cardWidth }) => {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: card.id,
   });
@@ -207,7 +221,7 @@ const DraggableCard: React.FC<{ card: Card; index: number }> = ({ card, index })
   return (
     <div
       ref={setNodeRef}
-      style={{ ...style, width: `${DEFAULT_CARD_WIDTH}px` }}
+      style={{ ...style, width: `${cardWidth}px` }}
       {...attributes}
       {...listeners}
       className="rounded-xl overflow-hidden shadow-lg hover:scale-105 cursor-grab active:cursor-grabbing will-change-transform"
@@ -228,7 +242,8 @@ const DroppableColumn: React.FC<{
   columnId: number;
   cards: Card[];
   isOver: boolean;
-}> = ({ columnId, cards, isOver }) => {
+  cardWidth: number;
+}> = ({ columnId, cards, isOver, cardWidth }) => {
   const { setNodeRef } = useDroppable({
     id: `column-${columnId}`,
   });
@@ -238,7 +253,7 @@ const DroppableColumn: React.FC<{
       ref={setNodeRef}
       className={`p-4 ${isOver ? 'bg-purple-900/10' : ''}`}
       style={{
-        minWidth: `${DEFAULT_CARD_WIDTH + 32}px`,
+        minWidth: `${cardWidth + 32}px`,
         transition: 'background-color 0.2s'
       }}
     >
@@ -247,7 +262,7 @@ const DroppableColumn: React.FC<{
         <div
           className="relative w-full flex justify-center"
           style={{
-            minHeight: cards.length > 0 ? `${(DEFAULT_CARD_WIDTH / CARD_ASPECT_RATIO) + (cards.length - 1) * 30}px` : '250px',
+            minHeight: cards.length > 0 ? `${(cardWidth / CARD_ASPECT_RATIO) + (cards.length - 1) * 30}px` : '250px',
           }}
         >
           {cards.map((card, idx) => (
@@ -259,7 +274,7 @@ const DroppableColumn: React.FC<{
                 zIndex: idx,
               }}
             >
-              <DraggableCard card={card} index={idx} />
+              <DraggableCard card={card} index={idx} cardWidth={cardWidth} />
             </div>
           ))}
         </div>
@@ -272,7 +287,8 @@ const DroppableColumn: React.FC<{
 const ManaCurveDisplay: React.FC<{
   draftedCards: Card[];
   onReorder: (newCards: Card[]) => void;
-}> = ({ draftedCards, onReorder }) => {
+  cardWidth: number;
+}> = ({ draftedCards, onReorder, cardWidth }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
 
@@ -293,7 +309,7 @@ const ManaCurveDisplay: React.FC<{
     cmcToStackIndex[cmc] = index;
   });
 
-  // Organize cards by their stack position
+  // Organize cards by their stack position (preserve order, don't sort within stack)
   const cardsByStack: { [key: number]: Card[] } = {};
   draftedCards.forEach(card => {
     const stackIndex = cmcToStackIndex[card.cmc];
@@ -350,10 +366,12 @@ const ManaCurveDisplay: React.FC<{
         targetCmc = maxCmc + 1;
       }
 
-      // Update the card's CMC
-      const updatedCards = draftedCards.map(card =>
-        card.id === active.id ? { ...card, cmc: targetCmc } : card
-      );
+      // Remove the card from its current position and add it to the end with new CMC
+      // This ensures the most recently moved card appears on top of its stack
+      const otherCards = draftedCards.filter(card => card.id !== active.id);
+      const updatedCard = { ...draggedCard, cmc: targetCmc };
+      const updatedCards = [...otherCards, updatedCard];
+
       onReorder(updatedCards);
     }
   };
@@ -386,6 +404,7 @@ const ManaCurveDisplay: React.FC<{
                 columnId={stackId}
                 cards={cardsByStack[stackId] || []}
                 isOver={overId === `column-${stackId}`}
+                cardWidth={cardWidth}
               />
             ))}
           </div>
@@ -495,6 +514,12 @@ export default function PlayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Draft state
+  const [draftState, setDraftState] = useState<DraftState | null>(null);
+  const [currentSet, setCurrentSet] = useState('mh3');
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
   // Toggle function for the hover preview setting
   const handleToggleHoverPreview = () => {
     setIsHoverPreviewEnabled(prev => {
@@ -534,61 +559,106 @@ export default function PlayPage() {
     }
   }, []);
 
-  // Function to fetch the booster data
-  useEffect(() => {
-    const fetchBooster = async () => {
-      setLoading(true);
-      setError(null);
+  // Helper function to preload images
+  const preloadImages = (cards: Card[]): Promise<void> => {
+    return new Promise((resolve) => {
+      const imagePromises = cards.map((card) => {
+        return new Promise<void>((resolveImg) => {
+          const img = new Image();
+          img.onload = () => resolveImg();
+          img.onerror = () => resolveImg(); // Resolve even on error to not block
+          img.src = card.imageUrl;
+        });
+      });
+
+      Promise.all(imagePromises).then(() => resolve());
+    });
+  };
+
+  // Helper function to fetch a pack and convert to Card objects
+  const fetchPackAsCards = async (): Promise<Card[]> => {
+    const response = await fetch(`https://mtgdraftassistant.onrender.com/booster?set=${currentSet}`);
+    if (!response.ok) {
+      throw new Error(`Failed to load booster pack (HTTP status: ${response.status})`);
+    }
+    const data: BoosterData = await response.json();
+
+    if (!data || !Array.isArray(data.pack)) {
+      throw new Error("Invalid API response: 'pack' array is missing or malformed.");
+    }
+
+    // Fetch card data including mana cost from Scryfall
+    const cardsWithData: Card[] = [];
+    for (const cardName of data.pack) {
       try {
-        const response = await fetch(API_ENDPOINT);
-        if (!response.ok) {
-          throw new Error(`Failed to load booster pack (HTTP status: ${response.status})`);
+        const scryfallResponse = await fetch(
+          `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cardName)}`
+        );
+        if (scryfallResponse.ok) {
+          const cardData = await scryfallResponse.json();
+          cardsWithData.push({
+            name: cardName,
+            imageUrl: getScryfallImageUrl(cardName),
+            id: `${cardName}-${cardsWithData.length}-${Date.now()}-${Math.random()}`,
+            cmc: cardData.cmc || 0,
+          });
         }
-        const data: BoosterData = await response.json();
-
-        if (!data || !Array.isArray(data.pack)) {
-            console.error("API response structure is unexpected:", data);
-            throw new Error("Invalid API response: 'pack' array is missing or malformed.");
-        }
-
-        // Fetch card data including mana cost from Scryfall
-        const cardsWithData: Card[] = [];
-        for (const cardName of data.pack) {
-          try {
-            const scryfallResponse = await fetch(
-              `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cardName)}`
-            );
-            if (scryfallResponse.ok) {
-              const cardData = await scryfallResponse.json();
-              cardsWithData.push({
-                name: cardName,
-                imageUrl: getScryfallImageUrl(cardName),
-                id: `${cardName}-${cardsWithData.length}-${Date.now()}`,
-                cmc: cardData.cmc || 0,
-              });
-            }
-          } catch (error) {
-            console.error(`Error fetching card data for ${cardName}:`, error);
-            // Fallback if fetch fails
-            cardsWithData.push({
-              name: cardName,
-              imageUrl: getScryfallImageUrl(cardName),
-              id: `${cardName}-${cardsWithData.length}-${Date.now()}`,
-              cmc: 0,
-            });
-          }
-        }
-
-        setBoosterCards(cardsWithData);
-      } catch (e) {
-        console.error("Fetch Error:", e);
-        setError(e instanceof Error ? e.message : "An unknown data loading error occurred.");
-      } finally {
-        setLoading(false);
+      } catch (error) {
+        console.error(`Error fetching card data for ${cardName}:`, error);
+        cardsWithData.push({
+          name: cardName,
+          imageUrl: getScryfallImageUrl(cardName),
+          id: `${cardName}-${cardsWithData.length}-${Date.now()}-${Math.random()}`,
+          cmc: 0,
+        });
       }
-    };
+    }
 
-    fetchBooster();
+    return cardsWithData;
+  };
+
+  // Initialize draft with 8 players
+  const initializeDraft = async () => {
+    setLoading(true);
+    setImagesLoaded(false);
+    setError(null);
+    try {
+      // Fetch 8 packs (one for each player)
+      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards());
+      const packs = await Promise.all(packsPromises);
+
+      // Preload images for the human player's pack
+      await preloadImages(packs[0]);
+
+      // Create 8 players
+      const players: Player[] = packs.map((pack, index) => ({
+        id: index,
+        isHuman: index === 0, // Player 0 is the human
+        picks: [],
+        currentPack: pack,
+      }));
+
+      setDraftState({
+        currentBooster: 1,
+        currentPick: 1,
+        players,
+        direction: 'clockwise',
+      });
+
+      // Set the human player's pack as the visible booster
+      setBoosterCards(packs[0]);
+      setImagesLoaded(true);
+    } catch (e) {
+      console.error("Draft initialization error:", e);
+      setError(e instanceof Error ? e.message : "Failed to initialize draft.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initialize draft on mount
+  useEffect(() => {
+    initializeDraft();
   }, []);
 
   // Handle clicking a card in the booster (selection)
@@ -596,18 +666,207 @@ export default function PlayPage() {
     setSelectedCardId(card.id === selectedCardId ? null : card.id);
   };
 
+  // Bot makes a pick using the /predict endpoint
+  const makeBotPick = async (player: Player): Promise<Card> => {
+    try {
+      const packCardNames = player.currentPack.map(c => c.name);
+      const deckCardNames = player.picks.map(c => c.name);
+
+      console.log('Making bot pick for player', player.id, {
+        pack: packCardNames,
+        deck: deckCardNames,
+        set: currentSet
+      });
+
+      const response = await fetch('https://mtgdraftassistant.onrender.com/predict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pack: packCardNames,
+          deck: deckCardNames,
+          set: currentSet,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('Bot prediction failed:', response.status, errorText);
+        console.warn('Falling back to random pick');
+        // Fallback: pick random card
+        return player.currentPack[Math.floor(Math.random() * player.currentPack.length)];
+      }
+
+      const data = await response.json();
+      console.log('Bot prediction response:', data);
+
+      // Try different possible response formats
+      const predictedCardName = data.prediction || data.card || data.pick || data.choice;
+
+      // Find the card in the pack
+      const pickedCard = player.currentPack.find(c => c.name === predictedCardName);
+      if (pickedCard) {
+        console.log('Bot picked:', predictedCardName);
+        return pickedCard;
+      }
+
+      console.warn('Predicted card not found in pack, using fallback');
+      // Fallback: pick the first card if prediction not found
+      return player.currentPack[0];
+    } catch (error) {
+      console.error('Bot pick error:', error);
+      // Fallback: pick random card
+      return player.currentPack[Math.floor(Math.random() * player.currentPack.length)];
+    }
+  };
+
+  // Process all picks for the current round
+  const processRound = async () => {
+    if (!draftState) return;
+
+    const updatedPlayers = [...draftState.players];
+
+    // Process bot picks in parallel
+    const botPickPromises = updatedPlayers
+      .filter(p => !p.isHuman && p.currentPack.length > 0)
+      .map(async (player) => {
+        const pickedCard = await makeBotPick(player);
+        return { playerId: player.id, pickedCard };
+      });
+
+    const botPicks = await Promise.all(botPickPromises);
+
+    // Apply bot picks
+    botPicks.forEach(({ playerId, pickedCard }) => {
+      const player = updatedPlayers[playerId];
+      player.picks.push(pickedCard);
+      player.currentPack = player.currentPack.filter(c => c.id !== pickedCard.id);
+    });
+
+    // Pass packs
+    const newPacks: Card[][] = updatedPlayers.map(() => []);
+
+    if (draftState.direction === 'clockwise') {
+      for (let i = 0; i < 8; i++) {
+        const nextPlayerIndex = (i + 1) % 8;
+        newPacks[nextPlayerIndex] = updatedPlayers[i].currentPack;
+      }
+    } else {
+      for (let i = 0; i < 8; i++) {
+        const nextPlayerIndex = (i - 1 + 8) % 8;
+        newPacks[nextPlayerIndex] = updatedPlayers[i].currentPack;
+      }
+    }
+
+    updatedPlayers.forEach((player, index) => {
+      player.currentPack = newPacks[index];
+    });
+
+    // Check if booster is done
+    const allPacksEmpty = updatedPlayers.every(p => p.currentPack.length === 0);
+
+    if (allPacksEmpty) {
+      // Start next booster
+      if (draftState.currentBooster < 3) {
+        await startNextBooster(updatedPlayers);
+      } else {
+        // Draft complete
+        setDraftState({
+          ...draftState,
+          players: updatedPlayers,
+        });
+      }
+    } else {
+      // Continue to next pick
+      setDraftState({
+        ...draftState,
+        currentPick: draftState.currentPick + 1,
+        players: updatedPlayers,
+      });
+
+      // Preload images before showing new pack
+      setImagesLoaded(false);
+      await preloadImages(updatedPlayers[0].currentPack);
+      setBoosterCards(updatedPlayers[0].currentPack);
+      setImagesLoaded(true);
+    }
+  };
+
+  // Start the next booster
+  const startNextBooster = async (players: Player[]) => {
+    if (!draftState) return;
+
+    try {
+      // Fetch new packs for all players
+      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards());
+      const packs = await Promise.all(packsPromises);
+
+      // Preload images for human player's new pack
+      setImagesLoaded(false);
+      await preloadImages(packs[0]);
+
+      players.forEach((player, index) => {
+        player.currentPack = packs[index];
+      });
+
+      const newBooster = draftState.currentBooster + 1;
+      const newDirection = newBooster % 2 === 1 ? 'clockwise' : 'counterclockwise';
+
+      setDraftState({
+        currentBooster: newBooster,
+        currentPick: 1,
+        players,
+        direction: newDirection,
+      });
+
+      setBoosterCards(players[0].currentPack);
+      setImagesLoaded(true);
+    } catch (error) {
+      console.error('Error starting next booster:', error);
+      setError('Failed to start next booster');
+    }
+  };
+
   // Handle the 'CONFIRM PICK' action
-  const handleConfirmPick = () => {
-    if (!selectedCardId) return;
+  const handleConfirmPick = async () => {
+    if (!selectedCardId || !draftState) return;
 
     const pickedCard = boosterCards.find(c => c.id === selectedCardId);
 
     if (pickedCard) {
-        setPickedCards([...pickedCards, pickedCard]);
-        setBoosterCards(boosterCards.filter(c => c.id !== selectedCardId));
+      // Start fade out
+      setIsTransitioning(true);
 
-        setSelectedCardId(null);
-        setHoveredCard(null);
+      // Wait for fade out to complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Add to human player's picks
+      setPickedCards([...pickedCards, pickedCard]);
+
+      // Update draft state
+      const updatedPlayers = [...draftState.players];
+      const humanPlayer = updatedPlayers[0];
+      humanPlayer.picks.push(pickedCard);
+      humanPlayer.currentPack = humanPlayer.currentPack.filter(c => c.id !== selectedCardId);
+
+      setDraftState({
+        ...draftState,
+        players: updatedPlayers,
+      });
+
+      setBoosterCards(humanPlayer.currentPack);
+      setSelectedCardId(null);
+      setHoveredCard(null);
+
+      // Process bot picks and pass packs
+      await processRound();
+
+      // Small delay before fade in
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Fade back in
+      setIsTransitioning(false);
     }
   };
 
@@ -615,7 +874,12 @@ export default function PlayPage() {
 
   return (
     <>
-      <Header onSettingsClick={() => setIsSettingsOpen(true)} activeTab="/play" />
+      <Header
+        onSettingsClick={() => setIsSettingsOpen(true)}
+        activeTab="/play"
+        boosterNumber={draftState?.currentBooster || 1}
+        pickNumber={draftState?.currentPick || 1}
+      />
 
       <div className="min-h-screen font-sans flex flex-col relative overflow-hidden" style={{ backgroundColor: '#0a0a0a' }}>
         {/* Background gradient image - positioned at bottom */}
@@ -719,15 +983,23 @@ export default function PlayPage() {
           </div>
         ) : (
           <>
-            <BoosterGrid
-              cards={boosterCards}
-              selectedCardId={selectedCardId}
-              onCardClick={handleCardSelection}
-              onCardHover={handleCardHover}
-              onMouseLeave={handleMouseLeave}
-              isHoverEnabled={isHoverPreviewEnabled}
-              cardWidth={cardWidth}
-            />
+            <div
+              className="transition-opacity"
+              style={{
+                opacity: isTransitioning ? 0 : 1,
+                transitionDuration: '0.2s'
+              }}
+            >
+              <BoosterGrid
+                cards={boosterCards}
+                selectedCardId={selectedCardId}
+                onCardClick={handleCardSelection}
+                onCardHover={handleCardHover}
+                onMouseLeave={handleMouseLeave}
+                isHoverEnabled={isHoverPreviewEnabled}
+                cardWidth={cardWidth}
+              />
+            </div>
 
             {/* Confirmation Button Area */}
             <div className="flex justify-end mt-6">
@@ -756,6 +1028,7 @@ export default function PlayPage() {
             <ManaCurveDisplay
               draftedCards={pickedCards}
               onReorder={setPickedCards}
+              cardWidth={cardWidth}
             />
           </>
         )}

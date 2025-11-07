@@ -12,16 +12,18 @@ const sorts_mill_goudy = Sorts_Mill_Goudy({
 interface HeaderProps {
     onSettingsClick?: () => void;
     activeTab?: string;
+    boosterNumber?: number;
+    pickNumber?: number;
 }
 
-export default function Header({ onSettingsClick, activeTab = "home" }: HeaderProps) {
+export default function Header({ onSettingsClick, activeTab = "home", boosterNumber = 1, pickNumber = 1 }: HeaderProps) {
     return (
         <header className="flex items-center justify-between px-4 py-2 border-b border-border">
             <div className="flex items-center gap-3">
                 <Image src="/lotus_icon.png" alt="Logo" width={48} height={48} />
                 <span className={`${sorts_mill_goudy.className} text-2xl text-white`}>LOTUS</span>
                 <span className="italic text-yellow-500 ml-2" style={{ fontSize: '14px' }}>
-                    Booster 1 / Pick 1
+                    Booster {boosterNumber} / Pick {pickNumber}
                 </span>
             </div>
 
