@@ -1,506 +1,27 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Header from "@/components/Header";
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent, DragOverEvent, useDroppable, useDraggable } from '@dnd-kit/core';
-import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-
-// === CONFIGURATION CONSTANTS ===
-// Default card display width in pixels
-const DEFAULT_CARD_WIDTH = 170;
-const MIN_CARD_WIDTH = 120;
-const MAX_CARD_WIDTH = 350;
-
-// MTG card aspect ratio (don't change this)
-const CARD_ASPECT_RATIO = 2.5 / 3.5;
-
-// Scryfall image quality
-// Available versions and their sizes:
-// - 'small': 146 x 204 (not recommended, too low quality)
-// - 'normal': 488 x 680 (good for smaller displays)
-// - 'large': 672 x 936 (good balance)
-// - 'png': 745 x 1040 (highest quality, recommended)
-// For card sizes up to 300px, 'png' is recommended
-// For larger sizes (300px+), 'png' is essential for clarity
-const SCRYFALL_IMAGE_VERSION = 'png';
-// ==========================================================
-
-// --- Type Definitions ---
-interface Card {
-  name: string;
-  imageUrl: string;
-  id: string; // Unique identifier for picking/keys
-  cmc: number; // Converted mana cost
-  columnId?: number; // Which column the card is assigned to (for manual organization)
-}
-
-interface BoosterData {
-  // Corrected structure based on the console error report
-  pack: string[];
-  set: string;
-  count: number;
-}
-
-interface Player {
-  id: number;
-  isHuman: boolean;
-  picks: Card[];
-  currentPack: Card[];
-}
-
-interface DraftState {
-  currentBooster: number; // 1, 2, or 3
-  currentPick: number; // Pick number within the booster
-  players: Player[];
-  direction: 'clockwise' | 'counterclockwise'; // Direction changes each booster
-}
-
-interface HoverPosition {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-const API_ENDPOINT = 'https://mtgdraftassistant.onrender.com/booster?set=MH3';
-
-/**
- * Generates a Scryfall URL that redirects to the high-resolution card image.
- */
-const getScryfallImageUrl = (cardName: string): string => {
-  const encodedName = encodeURIComponent(cardName);
-  return `https://api.scryfall.com/cards/named?exact=${encodedName}&format=image&version=${SCRYFALL_IMAGE_VERSION}`;
-};
-
-// CSS Keyframe for modern animation (Injecting the style tag directly)
-const HOVER_PREVIEW_STYLE = `
-@keyframes pop-in {
-    0% { transform: scale(0.9); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
-}
-.pop-in {
-    animation: pop-in 0.3s ease-out forwards;
-}
-
-@keyframes radiate {
-    0%, 100% {
-        box-shadow: 0 -8px 16px rgba(250, 204, 21, 0.6), 0 -4px 8px rgba(250, 204, 21, 0.4), 0 -2px 4px rgba(250, 204, 21, 0.3);
-    }
-    50% {
-        box-shadow: 0 -16px 28px rgba(250, 204, 21, 0.8), 0 -8px 16px rgba(250, 204, 21, 0.6), 0 -4px 8px rgba(250, 204, 21, 0.4);
-    }
-}
-.radiate {
-    animation: radiate 2s ease-in-out infinite;
-}
-
-/* Custom slider styles */
-input[type="range"].slider::-webkit-slider-thumb {
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #9333ea;
-    cursor: pointer;
-    border: 2px solid white;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-input[type="range"].slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #9333ea;
-    cursor: pointer;
-    border: 2px solid white;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-input[type="range"].slider::-webkit-slider-thumb:hover {
-    background: #a855f7;
-    transform: scale(1.1);
-}
-
-input[type="range"].slider::-moz-range-thumb:hover {
-    background: #a855f7;
-    transform: scale(1.1);
-}
-`;
-
-
-// Card Hover Preview Component (The "Zoom" Effect)
-const CardHoverPreview: React.FC<{ card: Card | null; cardPosition: HoverPosition | null }> = ({ card, cardPosition }) => {
-  if (!card || !cardPosition) return null;
-
-  const PREVIEW_WIDTH = 300; // Fixed width for the large preview card
-  const PREVIEW_HEIGHT = PREVIEW_WIDTH / CARD_ASPECT_RATIO;
-  const WINDOW_PADDING = 20;
-
-  let left = cardPosition.x + cardPosition.width + 10;
-  let top = cardPosition.y + cardPosition.height / 2 - PREVIEW_HEIGHT / 2;
-
-  // 1. Ensure the card is within the right edge of the viewport
-  if (left + PREVIEW_WIDTH + WINDOW_PADDING > window.innerWidth) {
-    // If it hits the right edge, place it to the left of the hovered card
-    left = cardPosition.x - PREVIEW_WIDTH - 10;
-
-    // If it still doesn't fit (or is too far left), just center it horizontally
-    if (left < WINDOW_PADDING) {
-      left = (window.innerWidth - PREVIEW_WIDTH) / 2;
-    }
-  }
-
-  // 2. Ensure the card is within the top edge of the viewport
-  if (top < WINDOW_PADDING) {
-    top = WINDOW_PADDING;
-  }
-
-  // 3. Ensure the card is within the bottom edge of the viewport
-  if (top + PREVIEW_HEIGHT + WINDOW_PADDING > window.innerHeight) {
-    top = window.innerHeight - PREVIEW_HEIGHT - WINDOW_PADDING;
-  }
-
-  // Final check to prevent placing outside the left boundary if necessary (mostly covered by centering logic above)
-  if (left < WINDOW_PADDING) {
-    left = WINDOW_PADDING;
-  }
-
-
-  return (
-    // Fixed positioning to float above everything else
-    <div
-      className="fixed z-50 pointer-events-none"
-      style={{
-        left: `${left}px`,
-        top: `${top}px`,
-        width: `${PREVIEW_WIDTH}px`,
-        height: `${PREVIEW_HEIGHT}px`,
-      }}
-    >
-        <div
-          className="relative rounded-2xl shadow-2xl pop-in transform origin-top-left"
-          style={{
-            boxShadow: '0 10px 40px rgba(0, 0, 0, 0.9), 0 0 20px rgba(147, 51, 234, 0.8), 0 0 40px rgba(147, 51, 234, 0.5)',
-          }}
-        >
-          <img
-            src={card.imageUrl}
-            alt={card.name}
-            className="w-full h-auto rounded-2xl aspect-[2.5/3.5] object-cover border-4 border-white ring-4 ring-purple-600"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = `https://placehold.co/${PREVIEW_WIDTH}x${PREVIEW_HEIGHT}/374151/FFFFFF?text=${encodeURIComponent(card.name)}`;
-              (e.target as HTMLImageElement).onerror = null;
-            }}
-          />
-        </div>
-    </div>
-  );
-};
-
-// Draggable Card Component for Mana Curve
-const DraggableCard: React.FC<{ card: Card; index: number; cardWidth: number }> = ({ card, index, cardWidth }) => {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: card.id,
-  });
-
-  // Calculate natural stacking with slight rotation and offset
-  const naturalRotation = (index % 3 - 1) * 2; // Slight rotation between -2 and 2 degrees
-  const naturalOffsetX = (index % 3 - 1) * 3; // Slight horizontal offset
-
-  const style = transform
-    ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        opacity: isDragging ? 0.5 : 1,
-        zIndex: isDragging ? 1000 : 'auto',
-      }
-    : {
-        transform: `rotate(${naturalRotation}deg) translateX(${naturalOffsetX}px)`,
-      };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ ...style, width: `${cardWidth}px` }}
-      {...attributes}
-      {...listeners}
-      className="rounded-xl overflow-hidden shadow-lg hover:scale-105 cursor-grab active:cursor-grabbing will-change-transform"
-      title={card.name}
-    >
-      <img
-        src={card.imageUrl}
-        alt={card.name}
-        className="w-full h-auto aspect-[2.5/3.5] object-cover pointer-events-none"
-        draggable={false}
-      />
-    </div>
-  );
-};
-
-// Droppable Column Component (Invisible)
-const DroppableColumn: React.FC<{
-  columnId: number;
-  cards: Card[];
-  isOver: boolean;
-  cardWidth: number;
-}> = ({ columnId, cards, isOver, cardWidth }) => {
-  const { setNodeRef } = useDroppable({
-    id: `column-${columnId}`,
-  });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`p-4 ${isOver ? 'bg-purple-900/10' : ''}`}
-      style={{
-        minWidth: `${cardWidth + 32}px`,
-        transition: 'background-color 0.2s'
-      }}
-    >
-      <div className="flex flex-col items-center">
-        {/* Column of stacked cards */}
-        <div
-          className="relative w-full flex justify-center"
-          style={{
-            minHeight: cards.length > 0 ? `${(cardWidth / CARD_ASPECT_RATIO) + (cards.length - 1) * 30}px` : '250px',
-          }}
-        >
-          {cards.map((card, idx) => (
-            <div
-              key={card.id}
-              className="absolute will-change-transform"
-              style={{
-                top: `${idx * 30}px`,
-                zIndex: idx,
-              }}
-            >
-              <DraggableCard card={card} index={idx} cardWidth={cardWidth} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Mana Curve Display Component
-const ManaCurveDisplay: React.FC<{
-  draftedCards: Card[];
-  onReorder: (newCards: Card[]) => void;
-  cardWidth: number;
-}> = ({ draftedCards, onReorder, cardWidth }) => {
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 5,
-      },
-    })
-  );
-
-  // Get unique CMC values and sort them
-  const uniqueCmcs = Array.from(new Set(draftedCards.map(card => card.cmc))).sort((a, b) => a - b);
-
-  // Map CMC to stack index (dynamic positioning)
-  const cmcToStackIndex: { [key: number]: number } = {};
-  uniqueCmcs.forEach((cmc, index) => {
-    cmcToStackIndex[cmc] = index;
-  });
-
-  // Organize cards by their stack position (preserve order, don't sort within stack)
-  const cardsByStack: { [key: number]: Card[] } = {};
-  draftedCards.forEach(card => {
-    const stackIndex = cmcToStackIndex[card.cmc];
-    if (!cardsByStack[stackIndex]) {
-      cardsByStack[stackIndex] = [];
-    }
-    cardsByStack[stackIndex].push(card);
-  });
-
-  // Number of visible stacks = number of unique CMCs + 1 (for dropping into new positions)
-  const numVisibleStacks = uniqueCmcs.length + 1;
-
-  // Track which CMC each stack represents (for the drag handler)
-  const stackToCmc: { [key: number]: number | null } = {};
-  uniqueCmcs.forEach((cmc, index) => {
-    stackToCmc[index] = cmc;
-  });
-  stackToCmc[numVisibleStacks - 1] = null; // Last stack is for new cards
-
-  const handleDragStart = (event: DragEndEvent) => {
-    setActiveId(event.active.id as string);
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    setOverId(event.over?.id as string || null);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveId(null);
-    setOverId(null);
-
-    if (!over) return;
-
-    const overId = over.id as string;
-
-    // Check if dropped on a column
-    if (overId.startsWith('column-')) {
-      const targetStackIndex = parseInt(overId.replace('column-', ''));
-      const draggedCard = draftedCards.find(card => card.id === active.id);
-
-      if (!draggedCard) return;
-
-      // Determine the target CMC based on where it was dropped
-      let targetCmc: number;
-
-      if (stackToCmc[targetStackIndex] !== undefined && stackToCmc[targetStackIndex] !== null) {
-        // Dropped on existing stack - use that CMC
-        targetCmc = stackToCmc[targetStackIndex] as number;
-      } else {
-        // Dropped on empty stack at the end - need to determine new CMC
-        // Find the highest CMC and add 1
-        const maxCmc = uniqueCmcs.length > 0 ? Math.max(...uniqueCmcs) : -1;
-        targetCmc = maxCmc + 1;
-      }
-
-      // Remove the card from its current position and add it to the end with new CMC
-      // This ensures the most recently moved card appears on top of its stack
-      const otherCards = draftedCards.filter(card => card.id !== active.id);
-      const updatedCard = { ...draggedCard, cmc: targetCmc };
-      const updatedCards = [...otherCards, updatedCard];
-
-      onReorder(updatedCards);
-    }
-  };
-
-  const handleDragCancel = () => {
-    setActiveId(null);
-    setOverId(null);
-  };
-
-  return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold text-white">Drafted Cards</h2>
-      {draftedCards.length === 0 ? (
-        <div className="text-gray-400 text-center py-8">
-          No cards drafted yet. Select a card and click CONFIRM PICK to start building your deck.
-        </div>
-      ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-          onDragCancel={handleDragCancel}
-        >
-          <div className="flex gap-4 items-start overflow-x-auto pb-4">
-            {Array.from({ length: numVisibleStacks }, (_, i) => i).map(stackId => (
-              <DroppableColumn
-                key={stackId}
-                columnId={stackId}
-                cards={cardsByStack[stackId] || []}
-                isOver={overId === `column-${stackId}`}
-                cardWidth={cardWidth}
-              />
-            ))}
-          </div>
-        </DndContext>
-      )}
-    </div>
-  );
-};
-
-// Individual Card Component
-const BoosterCard: React.FC<{
-  card: Card;
-  isSelected: boolean;
-  onCardClick: (card: Card) => void;
-  onCardHover: (card: Card, rect: DOMRect) => void;
-  onMouseLeave: () => void;
-  isHoverEnabled: boolean;
-}> = ({ card, isSelected, onCardClick, onCardHover, onMouseLeave, isHoverEnabled }) => {
-  const cardRef = useRef<HTMLDivElement>(null);
-  const fallbackImageUrl = `https://placehold.co/180x252/374151/FFFFFF?text=${encodeURIComponent(card.name)}`;
-
-  const handleMouseEnter = () => {
-    if (isHoverEnabled && cardRef.current) {
-        onCardHover(card, cardRef.current.getBoundingClientRect());
-    }
-  };
-
-  const hoverProps = isHoverEnabled
-    ? { onMouseEnter: handleMouseEnter, onMouseLeave }
-    : {};
-
-  return (
-    <div
-      ref={cardRef}
-      className={`w-full h-auto cursor-pointer p-0.5 rounded-xl transition-transform transform duration-150 ${
-        isSelected ? 'scale-[1.05] ring-4 ring-purple-600 shadow-purple-500/50' : ''
-      }`}
-      onClick={() => onCardClick(card)}
-      {...hoverProps}
-    >
-      <img
-        src={card.imageUrl}
-        alt={card.name}
-        className="w-full h-auto rounded-xl shadow-lg aspect-[2.5/3.5] object-cover"
-        onError={(e) => {
-          (e.target as HTMLImageElement).src = fallbackImageUrl;
-          (e.target as HTMLImageElement).onerror = null; // Prevent infinite loop
-        }}
-      />
-    </div>
-  );
-};
-
-// Main Grid Component now uses FLEXBOX for simple wrapping
-const BoosterGrid: React.FC<{
-  cards: Card[];
-  selectedCardId: string | null;
-  onCardClick: (card: Card) => void;
-  onCardHover: (card: Card, rect: DOMRect) => void;
-  onMouseLeave: () => void;
-  isHoverEnabled: boolean;
-  cardWidth: number;
-}> = ({ cards, selectedCardId, onCardClick, onCardHover, onMouseLeave, isHoverEnabled, cardWidth }) => {
-
-  // Define the base props to be spread
-  const baseCardProps = {
-    onCardHover: onCardHover,
-    onMouseLeave: onMouseLeave,
-    isHoverEnabled,
-  };
-
-  return (
-    // Outer container ensures centering and max width
-    <div className="flex justify-start mx-auto">
-
-      {/* Flexible container */}
-      <div className="flex flex-wrap justify-start gap-4 p-6 md:p-8">
-        {cards.map(card => (
-          <div
-            key={card.id}
-            style={{ width: `${cardWidth}px` }}
-            className="flex-shrink-0"
-          >
-            <BoosterCard
-              card={card}
-              {...baseCardProps}
-              isSelected={card.id === selectedCardId}
-              onCardClick={onCardClick}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
+import { Card, DraftState, HoverPosition, Player } from './types';
+import {
+  DEFAULT_CARD_WIDTH,
+  MIN_CARD_WIDTH,
+  MAX_CARD_WIDTH,
+  HOVER_PREVIEW_STYLE
+} from './utils/constants';
+import {
+  saveDraftToLocalStorage,
+  loadDraftFromLocalStorage,
+  clearDraftFromLocalStorage
+} from './utils/storage';
+import {
+  preloadImages,
+  fetchPackAsCards,
+  makeBotPick
+} from './utils/api';
+import { CardHoverPreview } from './components/CardHoverPreview';
+import { BoosterGrid } from './components/BoosterGrid';
+import { ManaCurveDisplay } from './components/ManaCurveDisplay';
 
 // --- Main Play Page Component ---
 export default function PlayPage() {
@@ -517,7 +38,6 @@ export default function PlayPage() {
   // Draft state
   const [draftState, setDraftState] = useState<DraftState | null>(null);
   const [currentSet, setCurrentSet] = useState('mh3');
-  const [imagesLoaded, setImagesLoaded] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Toggle function for the hover preview setting
@@ -559,72 +79,22 @@ export default function PlayPage() {
     }
   }, []);
 
-  // Helper function to preload images
-  const preloadImages = (cards: Card[]): Promise<void> => {
-    return new Promise((resolve) => {
-      const imagePromises = cards.map((card) => {
-        return new Promise<void>((resolveImg) => {
-          const img = new Image();
-          img.onload = () => resolveImg();
-          img.onerror = () => resolveImg(); // Resolve even on error to not block
-          img.src = card.imageUrl;
-        });
-      });
-
-      Promise.all(imagePromises).then(() => resolve());
-    });
-  };
-
-  // Helper function to fetch a pack and convert to Card objects
-  const fetchPackAsCards = async (): Promise<Card[]> => {
-    const response = await fetch(`https://mtgdraftassistant.onrender.com/booster?set=${currentSet}`);
-    if (!response.ok) {
-      throw new Error(`Failed to load booster pack (HTTP status: ${response.status})`);
-    }
-    const data: BoosterData = await response.json();
-
-    if (!data || !Array.isArray(data.pack)) {
-      throw new Error("Invalid API response: 'pack' array is missing or malformed.");
-    }
-
-    // Fetch card data including mana cost from Scryfall
-    const cardsWithData: Card[] = [];
-    for (const cardName of data.pack) {
-      try {
-        const scryfallResponse = await fetch(
-          `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cardName)}`
-        );
-        if (scryfallResponse.ok) {
-          const cardData = await scryfallResponse.json();
-          cardsWithData.push({
-            name: cardName,
-            imageUrl: getScryfallImageUrl(cardName),
-            id: `${cardName}-${cardsWithData.length}-${Date.now()}-${Math.random()}`,
-            cmc: cardData.cmc || 0,
-          });
-        }
-      } catch (error) {
-        console.error(`Error fetching card data for ${cardName}:`, error);
-        cardsWithData.push({
-          name: cardName,
-          imageUrl: getScryfallImageUrl(cardName),
-          id: `${cardName}-${cardsWithData.length}-${Date.now()}-${Math.random()}`,
-          cmc: 0,
-        });
-      }
-    }
-
-    return cardsWithData;
-  };
-
   // Initialize draft with 8 players
-  const initializeDraft = async () => {
+  const initializeDraft = async (clearStorage = true) => {
+    if (clearStorage) {
+      clearDraftFromLocalStorage();
+    }
+
+    // Reset all state
+    setSelectedCardId(null);
+    setHoveredCard(null);
+    setPickedCards([]);
     setLoading(true);
-    setImagesLoaded(false);
     setError(null);
+
     try {
       // Fetch 8 packs (one for each player)
-      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards());
+      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards(currentSet));
       const packs = await Promise.all(packsPromises);
 
       // Preload images for the human player's pack
@@ -647,7 +117,6 @@ export default function PlayPage() {
 
       // Set the human player's pack as the visible booster
       setBoosterCards(packs[0]);
-      setImagesLoaded(true);
     } catch (e) {
       console.error("Draft initialization error:", e);
       setError(e instanceof Error ? e.message : "Failed to initialize draft.");
@@ -656,69 +125,57 @@ export default function PlayPage() {
     }
   };
 
-  // Initialize draft on mount
+  // Initialize draft on mount - try to restore from localStorage first
   useEffect(() => {
-    initializeDraft();
+    // Check if this is a page refresh or new navigation
+    const isPageRefresh = sessionStorage.getItem('draft_page_visited') === 'true';
+
+    if (isPageRefresh) {
+      // This is a page refresh, try to restore from localStorage
+      const savedDraft = loadDraftFromLocalStorage();
+      if (savedDraft && savedDraft.draftState) {
+        // Restore draft state and derive booster cards from the human player's current pack
+        setDraftState(savedDraft.draftState);
+        setPickedCards(savedDraft.pickedCards);
+        setBoosterCards(savedDraft.draftState.players[0].currentPack);
+        setCurrentSet(savedDraft.currentSet);
+        setSelectedCardId(null);
+        setHoveredCard(null);
+        setLoading(false);
+        console.log('Draft restored from localStorage:', {
+          booster: savedDraft.draftState.currentBooster,
+          pick: savedDraft.draftState.currentPick,
+          pickedCards: savedDraft.pickedCards.length,
+          currentPackSize: savedDraft.draftState.players[0].currentPack.length,
+        });
+      } else {
+        // No saved draft, start new one
+        console.log('No saved draft found, starting new draft');
+        initializeDraft();
+      }
+    } else {
+      // This is a new navigation, start fresh draft
+      console.log('New navigation detected, starting fresh draft');
+      sessionStorage.setItem('draft_page_visited', 'true');
+      initializeDraft();
+    }
+
+    // Cleanup: Clear the session flag when navigating away
+    return () => {
+      sessionStorage.removeItem('draft_page_visited');
+    };
   }, []);
+
+  // Save draft state whenever it changes
+  useEffect(() => {
+    if (draftState && !loading) {
+      saveDraftToLocalStorage(draftState, pickedCards, currentSet);
+    }
+  }, [draftState, pickedCards, currentSet, loading]);
 
   // Handle clicking a card in the booster (selection)
   const handleCardSelection = (card: Card) => {
     setSelectedCardId(card.id === selectedCardId ? null : card.id);
-  };
-
-  // Bot makes a pick using the /predict endpoint
-  const makeBotPick = async (player: Player): Promise<Card> => {
-    try {
-      const packCardNames = player.currentPack.map(c => c.name);
-      const deckCardNames = player.picks.map(c => c.name);
-
-      console.log('Making bot pick for player', player.id, {
-        pack: packCardNames,
-        deck: deckCardNames,
-        set: currentSet
-      });
-
-      const response = await fetch('https://mtgdraftassistant.onrender.com/predict', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          pack: packCardNames,
-          deck: deckCardNames,
-          set: currentSet,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.warn('Bot prediction failed:', response.status, errorText);
-        console.warn('Falling back to random pick');
-        // Fallback: pick random card
-        return player.currentPack[Math.floor(Math.random() * player.currentPack.length)];
-      }
-
-      const data = await response.json();
-      console.log('Bot prediction response:', data);
-
-      // Try different possible response formats
-      const predictedCardName = data.prediction || data.card || data.pick || data.choice;
-
-      // Find the card in the pack
-      const pickedCard = player.currentPack.find(c => c.name === predictedCardName);
-      if (pickedCard) {
-        console.log('Bot picked:', predictedCardName);
-        return pickedCard;
-      }
-
-      console.warn('Predicted card not found in pack, using fallback');
-      // Fallback: pick the first card if prediction not found
-      return player.currentPack[0];
-    } catch (error) {
-      console.error('Bot pick error:', error);
-      // Fallback: pick random card
-      return player.currentPack[Math.floor(Math.random() * player.currentPack.length)];
-    }
   };
 
   // Process all picks for the current round
@@ -731,7 +188,7 @@ export default function PlayPage() {
     const botPickPromises = updatedPlayers
       .filter(p => !p.isHuman && p.currentPack.length > 0)
       .map(async (player) => {
-        const pickedCard = await makeBotPick(player);
+        const pickedCard = await makeBotPick(player, currentSet);
         return { playerId: player.id, pickedCard };
       });
 
@@ -786,10 +243,8 @@ export default function PlayPage() {
       });
 
       // Preload images before showing new pack
-      setImagesLoaded(false);
       await preloadImages(updatedPlayers[0].currentPack);
       setBoosterCards(updatedPlayers[0].currentPack);
-      setImagesLoaded(true);
     }
   };
 
@@ -799,11 +254,10 @@ export default function PlayPage() {
 
     try {
       // Fetch new packs for all players
-      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards());
+      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards(currentSet));
       const packs = await Promise.all(packsPromises);
 
       // Preload images for human player's new pack
-      setImagesLoaded(false);
       await preloadImages(packs[0]);
 
       players.forEach((player, index) => {
@@ -821,7 +275,6 @@ export default function PlayPage() {
       });
 
       setBoosterCards(players[0].currentPack);
-      setImagesLoaded(true);
     } catch (error) {
       console.error('Error starting next booster:', error);
       setError('Failed to start next booster');
@@ -979,7 +432,7 @@ export default function PlayPage() {
           <div className="text-center text-red-500">
             <h1 className="mt-10 text-2xl font-bold">Error Loading Data</h1>
             <p>{error}</p>
-            <p className="mt-4 text-gray-400 text-sm">Please check the console for the API's actual response structure. The app expects a top-level 'pack' array.</p>
+            <p className="mt-4 text-gray-400 text-sm">Please check the console for the API&apos;s actual response structure. The app expects a top-level &apos;pack&apos; array.</p>
           </div>
         ) : (
           <>
