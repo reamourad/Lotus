@@ -142,20 +142,12 @@ export default function PlayPage() {
         setSelectedCardId(null);
         setHoveredCard(null);
         setLoading(false);
-        console.log('Draft restored from localStorage:', {
-          booster: savedDraft.draftState.currentBooster,
-          pick: savedDraft.draftState.currentPick,
-          pickedCards: savedDraft.pickedCards.length,
-          currentPackSize: savedDraft.draftState.players[0].currentPack.length,
-        });
       } else {
         // No saved draft, start new one
-        console.log('No saved draft found, starting new draft');
         initializeDraft();
       }
     } else {
       // This is a new navigation, start fresh draft
-      console.log('New navigation detected, starting fresh draft');
       sessionStorage.setItem('draft_page_visited', 'true');
       initializeDraft();
     }
@@ -253,6 +245,9 @@ export default function PlayPage() {
     if (!draftState) return;
 
     try {
+      // Show loading screen
+      setLoading(true);
+
       // Fetch new packs for all players
       const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards(currentSet));
       const packs = await Promise.all(packsPromises);
@@ -278,6 +273,9 @@ export default function PlayPage() {
     } catch (error) {
       console.error('Error starting next booster:', error);
       setError('Failed to start next booster');
+    } finally {
+      // Hide loading screen
+      setLoading(false);
     }
   };
 
@@ -288,11 +286,7 @@ export default function PlayPage() {
     const pickedCard = boosterCards.find(c => c.id === selectedCardId);
 
     if (pickedCard) {
-      // Start fade out
       setIsTransitioning(true);
-
-      // Wait for fade out to complete
-      await new Promise(resolve => setTimeout(resolve, 200));
 
       // Add to human player's picks
       setPickedCards([...pickedCards, pickedCard]);
@@ -308,17 +302,12 @@ export default function PlayPage() {
         players: updatedPlayers,
       });
 
-      setBoosterCards(humanPlayer.currentPack);
       setSelectedCardId(null);
       setHoveredCard(null);
 
-      // Process bot picks and pass packs
+      // Process bot picks and pass packs (this will update boosterCards with the new pack)
       await processRound();
 
-      // Small delay before fade in
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      // Fade back in
       setIsTransitioning(false);
     }
   };
@@ -424,11 +413,7 @@ export default function PlayPage() {
           </div>
         )}
 
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-purple-400 text-xl">
-            <div className="animate-pulse">Opening Booster Pack...</div>
-          </div>
-        ) : error ? (
+        {error ? (
           <div className="text-center text-red-500">
             <h1 className="mt-10 text-2xl font-bold">Error Loading Data</h1>
             <p>{error}</p>
@@ -436,38 +421,40 @@ export default function PlayPage() {
           </div>
         ) : (
           <>
-            <div
-              className="transition-opacity"
-              style={{
-                opacity: isTransitioning ? 0 : 1,
-                transitionDuration: '0.2s'
-              }}
-            >
-              <BoosterGrid
-                cards={boosterCards}
-                selectedCardId={selectedCardId}
-                onCardClick={handleCardSelection}
-                onCardHover={handleCardHover}
-                onMouseLeave={handleMouseLeave}
-                isHoverEnabled={isHoverPreviewEnabled}
-                cardWidth={cardWidth}
-              />
-            </div>
+            {loading ? (
+              <div className="flex items-center justify-center h-64 text-purple-400 text-xl">
+                <div className="animate-pulse">Opening Booster Pack...</div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <BoosterGrid
+                    cards={boosterCards}
+                    selectedCardId={selectedCardId}
+                    onCardClick={handleCardSelection}
+                    onCardHover={handleCardHover}
+                    onMouseLeave={handleMouseLeave}
+                    isHoverEnabled={isHoverPreviewEnabled && !isTransitioning}
+                    cardWidth={cardWidth}
+                  />
+                </div>
 
-            {/* Confirmation Button Area */}
-            <div className="flex justify-end mt-6">
-              <button
-                onClick={handleConfirmPick}
-                className={`px-8 py-3 rounded-full text-white font-extrabold tracking-wider transition-all shadow-lg ${
-                  isPickReady
-                    ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/50'
-                    : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                }`}
-                disabled={!isPickReady}
-              >
-                CONFIRM PICK
-              </button>
-            </div>
+                {/* Confirmation Button Area */}
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={handleConfirmPick}
+                    className={`px-8 py-3 rounded-full text-white font-extrabold tracking-wider transition-all shadow-lg ${
+                      isPickReady
+                        ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/50'
+                        : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                    }`}
+                    disabled={!isPickReady}
+                  >
+                    CONFIRM PICK
+                  </button>
+                </div>
+              </>
+            )}
 
             <hr
               className="my-8 border-yellow-500 -mx-4 md:-mx-8"

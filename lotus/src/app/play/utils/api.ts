@@ -41,32 +41,33 @@ export const fetchPackAsCards = async (currentSet: string): Promise<Card[]> => {
     throw new Error("Invalid API response: 'pack' array is missing or malformed.");
   }
 
-  // Fetch card data including mana cost from Scryfall
-  const cardsWithData: Card[] = [];
-  for (const cardName of data.pack) {
+  // Fetch card data including mana cost from Scryfall - parallelize for speed
+  const cardPromises = data.pack.map(async (cardName) => {
     try {
       const scryfallResponse = await fetch(
-        `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(cardName)}`
+        `/api/scryfall?cardName=${encodeURIComponent(cardName)}&set=${data.set}`
       );
       if (scryfallResponse.ok) {
         const cardData = await scryfallResponse.json();
-        cardsWithData.push({
+        return {
           name: cardName,
           imageUrl: getScryfallImageUrl(cardName),
-          id: `${cardName}-${cardsWithData.length}-${Date.now()}-${Math.random()}`,
+          id: `${cardName}-${Date.now()}-${Math.random()}`,
           cmc: cardData.cmc || 0,
-        });
+        };
       }
     } catch (error) {
       console.error(`Error fetching card data for ${cardName}:`, error);
-      cardsWithData.push({
-        name: cardName,
-        imageUrl: getScryfallImageUrl(cardName),
-        id: `${cardName}-${cardsWithData.length}-${Date.now()}-${Math.random()}`,
-        cmc: 0,
-      });
     }
-  }
+    return {
+      name: cardName,
+      imageUrl: getScryfallImageUrl(cardName),
+      id: `${cardName}-${Date.now()}-${Math.random()}`,
+      cmc: 0,
+    };
+  });
+
+  const cardsWithData = await Promise.all(cardPromises);
 
   return cardsWithData;
 };
@@ -78,12 +79,6 @@ export const makeBotPick = async (player: Player, currentSet: string): Promise<C
   try {
     const packCardNames = player.currentPack.map(c => c.name);
     const deckCardNames = player.picks.map(c => c.name);
-
-    console.log('Making bot pick for player', player.id, {
-      pack: packCardNames,
-      deck: deckCardNames,
-      set: currentSet
-    });
 
     const response = await fetch('https://mtgdraftassistant.onrender.com/predict', {
       method: 'POST',
@@ -98,27 +93,30 @@ export const makeBotPick = async (player: Player, currentSet: string): Promise<C
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.warn('Bot prediction failed:', response.status, errorText);
-      console.warn('Falling back to random pick');
-      // Fallback: pick random card
+      console.warn('Bot prediction failed, using random pick');
       return player.currentPack[Math.floor(Math.random() * player.currentPack.length)];
     }
 
     const data = await response.json();
-    console.log('Bot prediction response:', data);
 
-    // Try different possible response formats
-    const predictedCardName = data.prediction || data.card || data.pick || data.choice;
+    // Handle the predictions array format from the API
+    let predictedCardName: string | undefined;
+
+    if (data.predictions && Array.isArray(data.predictions) && data.predictions.length > 0) {
+      // Get the highest probability prediction (first in array)
+      predictedCardName = data.predictions[0].card_name;
+    } else {
+      // Fallback to old format just in case
+      predictedCardName = data.prediction || data.card || data.pick || data.choice;
+    }
 
     // Find the card in the pack
     const pickedCard = player.currentPack.find(c => c.name === predictedCardName);
     if (pickedCard) {
-      console.log('Bot picked:', predictedCardName);
       return pickedCard;
     }
 
-    console.warn('Predicted card not found in pack, using fallback');
+    console.warn('AI predicted card not found in pack, using fallback');
     // Fallback: pick the first card if prediction not found
     return player.currentPack[0];
   } catch (error) {

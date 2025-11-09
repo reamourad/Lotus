@@ -39,26 +39,28 @@ export default function Home() {
       const data: BoosterResponse = await response.json();
       setBooster(data);
 
-      // Fetch card images from Scryfall with delay to respect rate limits
-      const cardData: ScryfallCard[] = [];
-
-      for (const cardName of data.pack) {
+      // Fetch card images from Scryfall in parallel for better performance
+      const cardPromises = data.pack.map(async (cardName) => {
         try {
-          // Try fuzzy search first, which is more forgiving
+          // Use our API route to avoid CORS issues
           const scryfallResponse = await fetch(
-            `https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}&set=${data.set.toLowerCase()}`
+            `/api/scryfall?cardName=${encodeURIComponent(cardName)}&set=${data.set.toLowerCase()}`
           );
 
           if (scryfallResponse.ok) {
-            const card = await scryfallResponse.json();
-            cardData.push(card);
+            return await scryfallResponse.json();
           } else {
             console.error(`Failed to fetch ${cardName}:`, scryfallResponse.status);
+            return null;
           }
         } catch (error) {
           console.error(`Error fetching ${cardName}:`, error);
+          return null;
         }
-      }
+      });
+
+      const cardResults = await Promise.all(cardPromises);
+      const cardData = cardResults.filter((card): card is ScryfallCard => card !== null);
 
       setCards(cardData);
     } catch (error) {
