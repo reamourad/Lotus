@@ -7,10 +7,11 @@ interface ManaCurveDisplayProps {
   draftedCards: Card[];
   onReorder: (newCards: Card[]) => void;
   cardWidth: number;
+  onCardClick?: (card: Card) => void;
 }
 
 // Mana Curve Display Component
-export const ManaCurveDisplay: React.FC<ManaCurveDisplayProps> = ({ draftedCards, onReorder, cardWidth }) => {
+export const ManaCurveDisplay: React.FC<ManaCurveDisplayProps> = ({ draftedCards, onReorder, cardWidth, onCardClick }) => {
   const [overId, setOverId] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -118,6 +119,7 @@ export const ManaCurveDisplay: React.FC<ManaCurveDisplayProps> = ({ draftedCards
                 cards={cardsByStack[stackId] || []}
                 isOver={overId === `column-${stackId}`}
                 cardWidth={cardWidth}
+                onCardClick={onCardClick}
               />
             ))}
           </div>

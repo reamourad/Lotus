@@ -22,6 +22,7 @@ import {
 import { CardHoverPreview } from './components/CardHoverPreview';
 import { BoosterGrid } from './components/BoosterGrid';
 import { ManaCurveDisplay } from './components/ManaCurveDisplay';
+import { CardViewer } from './components/CardViewer';
 
 // --- Main Play Page Component ---
 export default function PlayPage() {
@@ -39,6 +40,12 @@ export default function PlayPage() {
   const [draftState, setDraftState] = useState<DraftState | null>(null);
   const [currentSet, setCurrentSet] = useState('mh3');
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Card viewer state
+  const [viewedCardIndex, setViewedCardIndex] = useState<number | null>(null);
+
+  // AI prediction state
+  const [aiPredictions, setAiPredictions] = useState<Array<{ card_name: string; probability: number }> | null>(null);
 
   // Toggle function for the hover preview setting
   const handleToggleHoverPreview = () => {
@@ -169,6 +176,54 @@ export default function PlayPage() {
   const handleCardSelection = (card: Card) => {
     setSelectedCardId(card.id === selectedCardId ? null : card.id);
   };
+
+  // Fetch AI predictions for current pack
+  const fetchAiPredictions = useCallback(async () => {
+    if (!draftState || boosterCards.length === 0) return;
+
+    try {
+      const packCardNames = boosterCards.map(c => c.name);
+      const deckCardNames = pickedCards.map(c => c.name);
+
+      const requestBody = {
+        pack: packCardNames,
+        deck: deckCardNames,
+        set: currentSet,
+      };
+
+      console.log('=== AI PREDICTION API CALL ===');
+      console.log('URL:', 'https://mtgdraftassistant.onrender.com/predict');
+      console.log('Method:', 'POST');
+      console.log('Request Body:', JSON.stringify(requestBody, null, 2));
+      console.log('Pack size:', packCardNames.length);
+      console.log('Deck size:', deckCardNames.length);
+
+      const response = await fetch('https://mtgdraftassistant.onrender.com/predict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('AI predictions received:', data.predictions?.slice(0, 3));
+        if (data.predictions && Array.isArray(data.predictions)) {
+          setAiPredictions(data.predictions);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching AI predictions:', error);
+    }
+  }, [draftState, boosterCards, pickedCards, currentSet]);
+
+  // Fetch predictions when booster cards change
+  useEffect(() => {
+    if (boosterCards.length > 0 && !loading) {
+      fetchAiPredictions();
+    }
+  }, [boosterCards, loading, fetchAiPredictions]);
 
   // Process all picks for the current round
   const processRound = async () => {
@@ -312,6 +367,43 @@ export default function PlayPage() {
     }
   };
 
+  // Sort picked cards by CMC for viewer (matches mana curve display order)
+  const sortedPickedCards = React.useMemo(() => {
+    return [...pickedCards].sort((a, b) => a.cmc - b.cmc);
+  }, [pickedCards]);
+
+  // Card viewer handlers
+  const handleCardView = useCallback((card: Card) => {
+    const index = sortedPickedCards.findIndex(c => c.id === card.id);
+    if (index !== -1) {
+      setViewedCardIndex(index);
+    }
+  }, [sortedPickedCards]);
+
+  const handleCloseViewer = useCallback(() => {
+    setViewedCardIndex(null);
+  }, []);
+
+  const handlePreviousCard = useCallback(() => {
+    if (viewedCardIndex !== null && sortedPickedCards.length > 0) {
+      // Wrap around: if at first card (0), go to last card
+      const newIndex = viewedCardIndex === 0
+        ? sortedPickedCards.length - 1
+        : viewedCardIndex - 1;
+      setViewedCardIndex(newIndex);
+    }
+  }, [viewedCardIndex, sortedPickedCards.length]);
+
+  const handleNextCard = useCallback(() => {
+    if (viewedCardIndex !== null && sortedPickedCards.length > 0) {
+      // Wrap around: if at last card, go to first card (0)
+      const newIndex = viewedCardIndex === sortedPickedCards.length - 1
+        ? 0
+        : viewedCardIndex + 1;
+      setViewedCardIndex(newIndex);
+    }
+  }, [viewedCardIndex, sortedPickedCards.length]);
+
   const isPickReady = selectedCardId !== null;
 
   return (
@@ -436,6 +528,7 @@ export default function PlayPage() {
                     onMouseLeave={handleMouseLeave}
                     isHoverEnabled={isHoverPreviewEnabled && !isTransitioning}
                     cardWidth={cardWidth}
+                    aiPredictions={selectedCardId ? aiPredictions : null}
                   />
                 </div>
 
@@ -469,6 +562,7 @@ export default function PlayPage() {
               draftedCards={pickedCards}
               onReorder={setPickedCards}
               cardWidth={cardWidth}
+              onCardClick={handleCardView}
             />
           </>
         )}
@@ -479,6 +573,18 @@ export default function PlayPage() {
           <CardHoverPreview
             card={hoveredCard.card}
             cardPosition={hoveredCard.position}
+          />
+        )}
+
+        {/* Card Viewer Modal */}
+        {viewedCardIndex !== null && sortedPickedCards[viewedCardIndex] && (
+          <CardViewer
+            card={sortedPickedCards[viewedCardIndex]}
+            onClose={handleCloseViewer}
+            onPrevious={handlePreviousCard}
+            onNext={handleNextCard}
+            canGoPrevious={sortedPickedCards.length > 1}
+            canGoNext={sortedPickedCards.length > 1}
           />
         )}
       </div>

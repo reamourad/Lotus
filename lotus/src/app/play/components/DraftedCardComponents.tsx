@@ -4,7 +4,11 @@ import { Card } from '../types';
 import { CARD_ASPECT_RATIO } from '../utils/constants';
 
 // Draggable Card Component for Mana Curve
-export const DraggableCard: React.FC<{ card: Card; cardWidth: number }> = ({ card, cardWidth }) => {
+export const DraggableCard: React.FC<{
+  card: Card;
+  cardWidth: number;
+  onCardClick?: (card: Card) => void;
+}> = ({ card, cardWidth, onCardClick }) => {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: card.id,
   });
@@ -18,6 +22,14 @@ export const DraggableCard: React.FC<{ card: Card; cardWidth: number }> = ({ car
       }
     : {};
 
+  const handleClick = (e: React.MouseEvent) => {
+    // Only trigger click if not dragging
+    if (!isDragging && onCardClick) {
+      e.stopPropagation();
+      onCardClick(card);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
@@ -26,6 +38,7 @@ export const DraggableCard: React.FC<{ card: Card; cardWidth: number }> = ({ car
       {...listeners}
       className="rounded-xl overflow-hidden shadow-lg hover:scale-105 cursor-grab active:cursor-grabbing will-change-transform"
       title={card.name}
+      onClick={handleClick}
     >
       <img
         src={card.imageUrl}
@@ -43,7 +56,8 @@ export const DroppableColumn: React.FC<{
   cards: Card[];
   isOver: boolean;
   cardWidth: number;
-}> = ({ columnId, cards, isOver, cardWidth }) => {
+  onCardClick?: (card: Card) => void;
+}> = ({ columnId, cards, isOver, cardWidth, onCardClick }) => {
   const { setNodeRef } = useDroppable({
     id: `column-${columnId}`,
   });
@@ -74,7 +88,7 @@ export const DroppableColumn: React.FC<{
                 zIndex: idx,
               }}
             >
-              <DraggableCard card={card} cardWidth={cardWidth} />
+              <DraggableCard card={card} cardWidth={cardWidth} onCardClick={onCardClick} />
             </div>
           ))}
         </div>
