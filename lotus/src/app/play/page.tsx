@@ -38,7 +38,13 @@ export default function PlayPage() {
 
   // Draft state
   const [draftState, setDraftState] = useState<DraftState | null>(null);
-  const [currentSet, setCurrentSet] = useState('mh3');
+  const [currentSet, setCurrentSet] = useState(() => {
+    // Initialize from localStorage if available
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('selectedSet') || 'mh3';
+    }
+    return 'mh3';
+  });
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Card viewer state
@@ -101,8 +107,16 @@ export default function PlayPage() {
 
     try {
       // Fetch 8 packs (one for each player)
-      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards(currentSet));
-      const packs = await Promise.all(packsPromises);
+      // Fetch all with full details sequentially to avoid rate limiting
+      const packs: Card[][] = [];
+      for (let i = 0; i < 8; i++) {
+        const pack = await fetchPackAsCards(currentSet, true);
+        packs.push(pack);
+        // Small delay between packs
+        if (i < 7) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
 
       // Preload images for the human player's pack
       await preloadImages(packs[0]);
@@ -303,9 +317,16 @@ export default function PlayPage() {
       // Show loading screen
       setLoading(true);
 
-      // Fetch new packs for all players
-      const packsPromises = Array.from({ length: 8 }, () => fetchPackAsCards(currentSet));
-      const packs = await Promise.all(packsPromises);
+      // Fetch new packs for all players sequentially to avoid rate limiting
+      const packs: Card[][] = [];
+      for (let i = 0; i < 8; i++) {
+        const pack = await fetchPackAsCards(currentSet, true);
+        packs.push(pack);
+        // Small delay between packs
+        if (i < 7) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
 
       // Preload images for human player's new pack
       await preloadImages(packs[0]);
@@ -410,7 +431,7 @@ export default function PlayPage() {
     <>
       <Header
         onSettingsClick={() => setIsSettingsOpen(true)}
-        activeTab="/play"
+        activeTab="sets"
         boosterNumber={draftState?.currentBooster || 1}
         pickNumber={draftState?.currentPick || 1}
       />

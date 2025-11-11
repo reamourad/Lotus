@@ -35,8 +35,8 @@ export default function Header({ onSettingsClick, activeTab = "home", boosterNum
                             Home
                         </Link>
                     </Tabs.Trigger>
-                    <Tabs.Trigger asChild value="/play">
-                        <Link href="/play" className="px-4 py-2 text-base font-medium">
+                    <Tabs.Trigger asChild value="sets">
+                        <Link href="/sets" className="px-4 py-2 text-base font-medium">
                             Play
                         </Link>
                     </Tabs.Trigger>
