@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from "@/components/Header";
 import { Card, DraftState, HoverPosition, Player } from './types';
 import {
@@ -23,6 +23,7 @@ import { CardHoverPreview } from './components/CardHoverPreview';
 import { BoosterGrid } from './components/BoosterGrid';
 import { ManaCurveDisplay } from './components/ManaCurveDisplay';
 import { CardViewer } from './components/CardViewer';
+import { DraftResults } from './components/DraftResults'; // Import DraftResults
 
 // --- Main Play Page Component ---
 export default function PlayPage() {
@@ -52,6 +53,11 @@ export default function PlayPage() {
 
   // AI prediction state
   const [aiPredictions, setAiPredictions] = useState<Array<{ card_name: string; probability: number }> | null>(null);
+  const predictionAbortController = useRef<AbortController | null>(null);
+  const lastPredictionPackKey = useRef<string>('');
+
+  // Determine if draft is complete
+  const isDraftComplete = draftState && draftState.currentBooster === 3 && draftState.players.every(p => p.currentPack.length === 0);
 
   // Toggle function for the hover preview setting
   const handleToggleHoverPreview = () => {
@@ -93,7 +99,7 @@ export default function PlayPage() {
   }, []);
 
   // Initialize draft with 8 players
-  const initializeDraft = async (clearStorage = true) => {
+  const initializeDraft = useCallback(async (clearStorage = true) => {
     if (clearStorage) {
       clearDraftFromLocalStorage();
     }
@@ -104,19 +110,16 @@ export default function PlayPage() {
     setPickedCards([]);
     setLoading(true);
     setError(null);
+    setAiPredictions(null); // Clear old predictions
+    lastPredictionPackKey.current = ''; // Reset prediction tracking for new draft
 
     try {
-      // Fetch 8 packs (one for each player)
-      // Fetch all with full details sequentially to avoid rate limiting
-      const packs: Card[][] = [];
-      for (let i = 0; i < 8; i++) {
-        const pack = await fetchPackAsCards(currentSet, true);
-        packs.push(pack);
-        // Small delay between packs
-        if (i < 7) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
+      // Fetch all 8 packs in PARALLEL for speed
+      const packPromises = Array.from({ length: 8 }, () =>
+        fetchPackAsCards(currentSet, true)
+      );
+
+      const packs = await Promise.all(packPromises);
 
       // Preload images for the human player's pack
       await preloadImages(packs[0]);
@@ -144,7 +147,7 @@ export default function PlayPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentSet]); // Add currentSet to dependency array as it's used inside initializeDraft
 
   // Initialize draft on mount - try to restore from localStorage first
   useEffect(() => {
@@ -177,7 +180,7 @@ export default function PlayPage() {
     return () => {
       sessionStorage.removeItem('draft_page_visited');
     };
-  }, []);
+  }, [initializeDraft]);
 
   // Save draft state whenever it changes
   useEffect(() => {
@@ -195,8 +198,27 @@ export default function PlayPage() {
   const fetchAiPredictions = useCallback(async () => {
     if (!draftState || boosterCards.length === 0) return;
 
+    // Create a unique key for this pack to prevent duplicate requests
+    const packCardNames = boosterCards.map(c => c.name);
+    const packKey = packCardNames.sort().join('|');
+
+    // Skip if we've already requested predictions for this exact pack
+    if (packKey === lastPredictionPackKey.current) {
+      console.log('Skipping duplicate prediction request for same pack');
+      return;
+    }
+
+    // Cancel any previous in-flight request
+    if (predictionAbortController.current) {
+      predictionAbortController.current.abort();
+    }
+
+    // Create new abort controller for this request
+    const abortController = new AbortController();
+    predictionAbortController.current = abortController;
+    lastPredictionPackKey.current = packKey;
+
     try {
-      const packCardNames = boosterCards.map(c => c.name);
       const deckCardNames = pickedCards.map(c => c.name);
 
       const requestBody = {
@@ -218,26 +240,45 @@ export default function PlayPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
+        signal: abortController.signal,
       });
 
       if (response.ok) {
         const data = await response.json();
-        console.log('AI predictions received:', data.predictions?.slice(0, 3));
+        console.log('AI predictions received:', JSON.stringify(data, null, 2)); // Log full response
         if (data.predictions && Array.isArray(data.predictions)) {
-          setAiPredictions(data.predictions);
+          // Validate that predictions match current pack (prevent race condition)
+          const currentPackNames = boosterCards.map(c => c.name);
+          const predictedCardNames = data.predictions.map((p: { card_name: string }) => p.card_name);
+
+          // Check if at least one prediction matches the current pack
+          const hasMatch = predictedCardNames.some((name: string) => currentPackNames.includes(name));
+
+          if (hasMatch) {
+            setAiPredictions(data.predictions);
+          } else {
+            console.warn('AI predictions do not match current pack - ignoring stale predictions');
+            console.log('Current pack:', currentPackNames);
+            console.log('Predicted for:', predictedCardNames);
+          }
         }
       }
     } catch (error) {
+      // Ignore abort errors (these are expected when we cancel requests)
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('AI prediction request cancelled (newer request in progress)');
+        return;
+      }
       console.error('Error fetching AI predictions:', error);
     }
   }, [draftState, boosterCards, pickedCards, currentSet]);
 
   // Fetch predictions when booster cards change
   useEffect(() => {
-    if (boosterCards.length > 0 && !loading) {
+    if (boosterCards.length > 0 && !loading && !isDraftComplete) { // Only fetch if draft not complete
       fetchAiPredictions();
     }
-  }, [boosterCards, loading, fetchAiPredictions]);
+  }, [boosterCards, loading, fetchAiPredictions, isDraftComplete]);
 
   // Process all picks for the current round
   const processRound = async () => {
@@ -289,11 +330,13 @@ export default function PlayPage() {
       if (draftState.currentBooster < 3) {
         await startNextBooster(updatedPlayers);
       } else {
-        // Draft complete
+        // Draft complete - set draftState to reflect final state
         setDraftState({
           ...draftState,
+          currentBooster: 3, // Ensure this is explicitly set to 3
           players: updatedPlayers,
         });
+        setBoosterCards([]); // Clear booster cards when draft is complete
       }
     } else {
       // Continue to next pick
@@ -317,16 +360,12 @@ export default function PlayPage() {
       // Show loading screen
       setLoading(true);
 
-      // Fetch new packs for all players sequentially to avoid rate limiting
-      const packs: Card[][] = [];
-      for (let i = 0; i < 8; i++) {
-        const pack = await fetchPackAsCards(currentSet, true);
-        packs.push(pack);
-        // Small delay between packs
-        if (i < 7) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      }
+      // Fetch all 8 packs in PARALLEL for speed
+      const packPromises = Array.from({ length: 8 }, () =>
+        fetchPackAsCards(currentSet, true)
+      );
+
+      const packs = await Promise.all(packPromises);
 
       // Preload images for human player's new pack
       await preloadImages(packs[0]);
@@ -346,6 +385,8 @@ export default function PlayPage() {
       });
 
       setBoosterCards(players[0].currentPack);
+      setAiPredictions(null); // Clear predictions for new pack
+      lastPredictionPackKey.current = ''; // Reset so predictions can be fetched for new booster
     } catch (error) {
       console.error('Error starting next booster:', error);
       setError('Failed to start next booster');
@@ -380,6 +421,8 @@ export default function PlayPage() {
 
       setSelectedCardId(null);
       setHoveredCard(null);
+      setAiPredictions(null); // Clear predictions after human pick
+      lastPredictionPackKey.current = ''; // Reset so predictions can be fetched for next pack
 
       // Process bot picks and pass packs (this will update boosterCards with the new pack)
       await processRound();
@@ -532,6 +575,8 @@ export default function PlayPage() {
             <p>{error}</p>
             <p className="mt-4 text-gray-400 text-sm">Please check the console for the API&apos;s actual response structure. The app expects a top-level &apos;pack&apos; array.</p>
           </div>
+        ) : isDraftComplete ? (
+          <DraftResults draftedCards={pickedCards} onRestartDraft={() => initializeDraft(true)} />
         ) : (
           <>
             {loading ? (

@@ -56,6 +56,8 @@ export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean
       imageUrl: getScryfallImageUrl(cardName),
       id: `${cardName}-${Date.now()}-${index}`,
       cmc: 0,
+      set_code: data.set,
+      collector_number: undefined,
     }));
   }
 
@@ -106,6 +108,8 @@ export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean
           imageUrl,
           id: `${cardName}-${Date.now()}-${i}`,
           cmc: cardData.cmc || 0,
+          set_code: cardData.set || data.set,
+          collector_number: cardData.collector_number,
         });
       } else {
         // API error, use fallback
@@ -114,6 +118,8 @@ export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean
           imageUrl: getScryfallImageUrl(cardName),
           id: `${cardName}-${Date.now()}-${i}`,
           cmc: 0,
+          set_code: data.set,
+          collector_number: undefined,
         });
       }
     } catch (error) {
@@ -124,6 +130,8 @@ export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean
         imageUrl: getScryfallImageUrl(cardName),
         id: `${cardName}-${Date.now()}-${i}`,
         cmc: 0,
+        set_code: data.set,
+        collector_number: undefined,
       });
     }
 

@@ -5,6 +5,8 @@ export interface Card {
   id: string; // Unique identifier for picking/keys
   cmc: number; // Converted mana cost
   columnId?: number; // Which column the card is assigned to (for manual organization)
+  set_code?: string; // Set code for Arena format export
+  collector_number?: string; // Collector number for Arena format export
 }
 
 export interface BoosterData {
