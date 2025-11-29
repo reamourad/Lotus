@@ -30,8 +30,27 @@ export const BoosterCard: React.FC<BoosterCardProps> = ({
     }
   };
 
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current || !isHoverEnabled) return;
+    const { left, top, width, height } = cardRef.current.getBoundingClientRect();
+    const x = e.clientX - left - width / 2;
+    const y = e.clientY - top - height / 2;
+    const rotateX = (-y / height) * 15; // Reduced rotation for subtlety
+    const rotateY = (x / width) * 15;
+    cardRef.current.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.05, 1.05, 1.05)`;
+    cardRef.current.style.transition = 'transform 0.05s linear'; // Faster transition while moving
+  };
+
+  const handleMouseLeaveCard = () => {
+    if (cardRef.current) {
+      cardRef.current.style.transform = 'perspective(1000px) rotateX(0) rotateY(0) scale3d(1, 1, 1)';
+      cardRef.current.style.transition = 'transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'; // Slower, smoother transition on leave
+    }
+    onMouseLeave();
+  };
+
   const hoverProps = isHoverEnabled
-    ? { onMouseEnter: handleMouseEnter, onMouseLeave }
+    ? { onMouseEnter: handleMouseEnter, onMouseMove: handleMouseMove, onMouseLeave: handleMouseLeaveCard }
     : {};
 
   // Get glow color based on probability percentage - only at the top
@@ -43,17 +62,17 @@ export const BoosterCard: React.FC<BoosterCardProps> = ({
 
     if (percentage < 10) {
       // Red for low probability (< 10%)
-      color = 'rgba(239, 68, 68, 0.6)'; // Red
+      color = 'rgba(239, 68, 68, 0.7)'; // Increased opacity
     } else if (percentage < 60) {
       // Yellow for medium probability (10-60%)
-      color = 'rgba(234, 179, 8, 0.6)'; // Yellow
+      color = 'rgba(234, 179, 8, 0.7)';
     } else {
       // Green for high probability (>= 60%)
-      color = 'rgba(34, 197, 94, 0.6)'; // Green
+      color = 'rgba(34, 197, 94, 0.7)';
     }
 
     return {
-      boxShadow: `0 -15px 30px -5px ${color}, 0 -8px 15px -3px ${color}`,
+      boxShadow: `0 0 35px -8px ${color}, 0 0 20px -10px ${color}`, // Larger, more diffuse glow
     };
   };
 
@@ -99,7 +118,7 @@ export const BoosterCard: React.FC<BoosterCardProps> = ({
   return (
     <div
       ref={cardRef}
-      className={`w-full h-auto cursor-pointer rounded-xl transition-transform transform duration-150 relative ${
+      className={`w-full h-auto cursor-pointer rounded-xl transform will-change-transform relative animate-fade-in ${
         isSelected ? 'scale-[1.05]' : ''
       }`}
       onClick={() => onCardClick(card)}

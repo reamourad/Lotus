@@ -479,15 +479,13 @@ export default function PlayPage() {
         pickNumber={draftState?.currentPick || 1}
       />
 
-      <div className="min-h-screen font-sans flex flex-col relative overflow-hidden" style={{ backgroundColor: '#0a0a0a' }}>
-        {/* Background gradient image - positioned at bottom */}
-        <div className="absolute inset-x-0 bottom-0 flex items-end justify-center pointer-events-none overflow-hidden">
-          <img
-            src="/gradient.png"
-            alt="Background gradient"
-            className="w-full h-[60vh] object-fill opacity-20"
-          />
-        </div>
+      <div
+        className="min-h-screen font-sans flex flex-col relative overflow-hidden"
+        style={{
+          background: 'radial-gradient(circle at top, #1a0a2e 0%, #0a0a0a 40%)',
+        }}
+      >
+
 
         <main className="px-4 md:px-8 pt-2 pb-4 flex-grow relative z-10">
           {/* Settings Modal */}
@@ -576,7 +574,7 @@ export default function PlayPage() {
             <p className="mt-4 text-gray-400 text-sm">Please check the console for the API&apos;s actual response structure. The app expects a top-level &apos;pack&apos; array.</p>
           </div>
         ) : isDraftComplete ? (
-          <DraftResults draftedCards={pickedCards} onRestartDraft={() => initializeDraft(true)} />
+          <DraftResults draftedCards={pickedCards} onRestartDraft={() => window.location.href = '/sets'} />
         ) : (
           <>
             {loading ? (
