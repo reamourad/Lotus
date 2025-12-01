@@ -29,7 +29,7 @@ export default function SetsPage() {
 
   const fetchSets = async () => {
     try {
-      const response = await fetch('/api/sets');
+      const response = await fetch('/api/sets', { cache: 'no-store' });
       if (!response.ok) {
         throw new Error('Failed to fetch sets');
       }
@@ -92,7 +92,7 @@ export default function SetsPage() {
           />
         </div>
 
-        <main className="flex-grow relative z-10 flex items-center justify-center px-4 py-8">
+        <main className="flex-grow relative z-10 flex flex-col items-center justify-center px-4 py-8">
           <div className="flex flex-wrap justify-center gap-6">
             {sets.map((set) => (
               <Button

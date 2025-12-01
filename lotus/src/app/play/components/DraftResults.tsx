@@ -49,13 +49,14 @@ const getCardCategory = (card: ScryfallCardDetails): CardType | null => {
     return null;
 };
 
+const TABS = ['All', ...Object.values(cardTypeEnum)];
 
 const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRestartDraft }) => {
   const [detailedCards, setDetailedCards] = useState<ScryfallCardDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState<CardType>(cardTypeEnum.CREATURE);
+  const [activeTab, setActiveTab] = useState<string>('All');
 
   useEffect(() => {
     const fetchAllCardData = async () => {
@@ -68,11 +69,7 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
               if (!res.ok) throw new Error(`Failed for ${card.name}`);
               return res.json();
             })
-            .then(data => {
-              // Preserve the original unique ID from our card object
-              const originalId = card.id;
-              return { ...card, ...data, id: originalId };
-            })
+            .then(data => ({ ...card, ...data, id: card.id }))
         );
         const results = await Promise.all(promises);
         setDetailedCards(results);
@@ -204,9 +201,9 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
                             <YAxis 
                             axisLine={false} 
                             tickLine={false} 
-                            tick={{ fill: '#9ca3af', fontSize: 12 }} 
+                            tick={{ fill: '#9ca3af', fontSize: 12 }}
                             />
-                            <Tooltip
+                            <Tooltip 
                             cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
                             contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#ffffff' }}
                             labelStyle={{ color: '#ffffff' }}
@@ -244,7 +241,7 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
                                 <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                             </Pie>
-                            <Tooltip
+                            <Tooltip 
                             contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#ffffff' }}
                             labelStyle={{ color: '#ffffff' }}
                             itemStyle={{ color: '#ffffff' }}
@@ -270,18 +267,19 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
         <div className="mt-10">
             <h2 className="text-xl font-bold text-white mb-4">Drafted Card Pool</h2>
             <div className="flex border-b border-gray-700 mb-6 sticky top-0 bg-[#0f0b1a] z-10">
-                {(Object.keys(groupedCards) as Array<string>).map((type) => {
-                    if(groupedCards[type].length === 0) return null;
+                {TABS.map((type) => {
+                    const count = type === 'All' ? detailedCards.length : (groupedCards[type]?.length || 0);
+                    if(count === 0 && type !== 'All') return null;
                     return (
                         <button
                             key={type}
-                            onClick={() => setActiveTab(type as CardType)}
+                            onClick={() => setActiveTab(type)}
                             className={`
                             pb-3 px-6 text-sm font-medium transition-colors relative
                             ${activeTab === type ? 'text-white' : 'text-gray-500 hover:text-gray-300'}
                             `}
                         >
-                            {type} ({groupedCards[type].length})
+                            {type} ({count})
                             {activeTab === type && (
                             <div className="absolute bottom-0 left-0 w-full h-0.5 bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]"></div>
                             )}
@@ -291,9 +289,9 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-20">
-                {(groupedCards[activeTab] || []).map((card) => (
+                {(activeTab === 'All' ? detailedCards : (groupedCards[activeTab] || [])).map((card) => (
                 <div 
-                    key={card.id} 
+                    key={`${activeTab}-${card.id}`} 
                     className="group relative aspect-[5/7] rounded-lg overflow-hidden bg-gray-800 border border-gray-700 hover:border-purple-500/50 hover:shadow-[0_0_15px_rgba(168,85,247,0.3)] transition-all duration-300 cursor-pointer"
                 >
                     <img 
