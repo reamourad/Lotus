@@ -36,3 +36,8 @@ export interface HoverPosition {
   width: number;
   height: number;
 }
+
+export interface Settings {
+  isAiPredictionEnabled: boolean;
+  isHoverPreviewEnabled: boolean;
+}

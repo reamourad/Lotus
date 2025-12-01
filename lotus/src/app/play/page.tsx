@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from "@/components/Header";
-import { Card, DraftState, HoverPosition, Player } from './types';
+import { Card, DraftState, HoverPosition, Player, Settings } from './types';
 import {
   DEFAULT_CARD_WIDTH,
   MIN_CARD_WIDTH,
@@ -12,7 +12,9 @@ import {
 import {
   saveDraftToLocalStorage,
   loadDraftFromLocalStorage,
-  clearDraftFromLocalStorage
+  clearDraftFromLocalStorage,
+  saveSettings,
+  loadSettings
 } from './utils/storage';
 import {
   preloadImages,
@@ -32,6 +34,7 @@ export default function PlayPage() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [hoveredCard, setHoveredCard] = useState<{ card: Card; position: HoverPosition } | null>(null);
   const [isHoverPreviewEnabled, setIsHoverPreviewEnabled] = useState(true);
+  const [isAiPredictionEnabled, setIsAiPredictionEnabled] = useState(true);
   const [cardWidth, setCardWidth] = useState(DEFAULT_CARD_WIDTH);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -67,6 +70,10 @@ export default function PlayPage() {
       }
       return !prev;
     });
+  };
+
+  const handleToggleAiPrediction = () => {
+    setIsAiPredictionEnabled(prev => !prev);
   };
 
   // Function to map DOMRect to our simpler HoverPosition type
@@ -151,6 +158,13 @@ export default function PlayPage() {
 
   // Initialize draft on mount - try to restore from localStorage first
   useEffect(() => {
+    // Load settings from localStorage
+    const savedSettings = loadSettings();
+    if (savedSettings) {
+      setIsHoverPreviewEnabled(savedSettings.isHoverPreviewEnabled);
+      setIsAiPredictionEnabled(savedSettings.isAiPredictionEnabled);
+    }
+
     // Check if this is a page refresh or new navigation
     const isPageRefresh = sessionStorage.getItem('draft_page_visited') === 'true';
 
@@ -188,6 +202,15 @@ export default function PlayPage() {
       saveDraftToLocalStorage(draftState, pickedCards, currentSet);
     }
   }, [draftState, pickedCards, currentSet, loading]);
+
+  // Save settings whenever they change
+  useEffect(() => {
+    const settings: Settings = {
+      isHoverPreviewEnabled,
+      isAiPredictionEnabled,
+    };
+    saveSettings(settings);
+  }, [isHoverPreviewEnabled, isAiPredictionEnabled]);
 
   // Handle clicking a card in the booster (selection)
   const handleCardSelection = (card: Card) => {
@@ -275,10 +298,11 @@ export default function PlayPage() {
 
   // Fetch predictions when booster cards change
   useEffect(() => {
-    if (boosterCards.length > 0 && !loading && !isDraftComplete) { // Only fetch if draft not complete
+    if (boosterCards.length > 0 && !loading && !isDraftComplete && isAiPredictionEnabled) { // Only fetch if draft not complete
       fetchAiPredictions();
     }
-  }, [boosterCards, loading, fetchAiPredictions, isDraftComplete]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boosterCards, loading, isDraftComplete, isAiPredictionEnabled]);
 
   // Process all picks for the current round
   const processRound = async () => {
@@ -562,6 +586,33 @@ export default function PlayPage() {
                     />
                   </button>
                 </div>
+
+                {/* AI Prediction Toggle */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      AI Prediction
+                    </label>
+                    <p className="text-xs text-gray-500">
+                      Show AI pick predictions
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleToggleAiPrediction}
+                    className={`relative inline-flex flex-shrink-0 h-7 w-12 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 focus:ring-offset-gray-800 ${
+                      isAiPredictionEnabled ? 'bg-purple-600' : 'bg-gray-600'
+                    }`}
+                    role="switch"
+                    aria-checked={isAiPredictionEnabled}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-6 w-6 rounded-full bg-white shadow transform ring-0 transition ease-in-out duration-200 ${
+                        isAiPredictionEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -592,7 +643,7 @@ export default function PlayPage() {
                     onMouseLeave={handleMouseLeave}
                     isHoverEnabled={isHoverPreviewEnabled && !isTransitioning}
                     cardWidth={cardWidth}
-                    aiPredictions={selectedCardId ? aiPredictions : null}
+                    aiPredictions={isAiPredictionEnabled && selectedCardId ? aiPredictions : null}
                   />
                 </div>
 

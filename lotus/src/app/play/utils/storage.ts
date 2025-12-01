@@ -1,5 +1,5 @@
 import { STORAGE_KEYS } from './constants';
-import { DraftState, Card } from '../types';
+import { DraftState, Card, Settings } from '../types';
 
 /**
  * Save draft state to localStorage
@@ -57,4 +57,30 @@ export const clearDraftFromLocalStorage = () => {
   } catch (error) {
     console.error('Failed to clear draft from localStorage:', error);
   }
+};
+
+/**
+ * Save settings to localStorage
+ */
+export const saveSettings = (settings: Settings) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  } catch (error) {
+    console.error('Failed to save settings to localStorage:', error);
+  }
+};
+
+/**
+ * Load settings from localStorage
+ */
+export const loadSettings = (): Settings | null => {
+  try {
+    const settingsStr = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    if (settingsStr) {
+      return JSON.parse(settingsStr);
+    }
+  } catch (error) {
+    console.error('Failed to load settings from localStorage:', error);
+  }
+  return null;
 };

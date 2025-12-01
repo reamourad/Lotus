@@ -25,6 +25,7 @@ export const STORAGE_KEYS = {
   DRAFT_STATE: 'mtg_draft_state',
   PICKED_CARDS: 'mtg_picked_cards',
   CURRENT_SET: 'mtg_current_set',
+  SETTINGS: 'mtg_settings',
 };
 
 // CSS Keyframe for modern animation
