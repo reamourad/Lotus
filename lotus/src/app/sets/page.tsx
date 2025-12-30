@@ -42,9 +42,11 @@ export default function SetsPage() {
     }
   };
 
-  const handleSetSelect = (setCode: string) => {
+  const handleSetSelect = (setCode: string, hasModel: boolean) => {
     // Store selected set in localStorage (convert to lowercase as API expects it)
     localStorage.setItem('selectedSet', setCode.toLowerCase());
+    // Store has_model status
+    localStorage.setItem('selectedSetHasModel', hasModel.toString());
     // Navigate to play page
     router.push('/play');
   };
@@ -95,24 +97,30 @@ export default function SetsPage() {
         <main className="flex-grow relative z-10 flex flex-col items-center justify-center px-4 py-8">
           <div className="flex flex-wrap justify-center gap-6">
             {sets.map((set) => (
-              <Button
-                key={set.code}
-                onClick={() => handleSetSelect(set.code)}
-                variant="tertiary"
-                className="!p-1"
-              >
-                {set.has_icon ? (
-                  <img
-                    src={`/api/sets/${set.code}/icon`}
-                    alt={set.name}
-                    className="w-48 h-48 object-contain"
-                  />
-                ) : (
-                  <div className="text-gray-500 text-4xl font-bold w-48 h-48 flex items-center justify-center">
-                    {set.code}
+              <div key={set.code} className="relative">
+                <Button
+                  onClick={() => handleSetSelect(set.code, set.has_model)}
+                  variant="tertiary"
+                  className="!p-1"
+                >
+                  {set.has_icon ? (
+                    <img
+                      src={`/api/sets/${set.code}/icon`}
+                      alt={set.name}
+                      className="w-48 h-48 object-contain"
+                    />
+                  ) : (
+                    <div className="text-gray-500 text-4xl font-bold w-48 h-48 flex items-center justify-center">
+                      {set.code}
+                    </div>
+                  )}
+                </Button>
+                {!set.has_model && (
+                  <div className="absolute top-2 right-2 bg-yellow-500/90 text-black text-xs font-bold px-2 py-1 rounded">
+                    BETA
                   </div>
                 )}
-              </Button>
+              </div>
             ))}
           </div>
         </main>

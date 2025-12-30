@@ -49,6 +49,14 @@ export default function PlayPage() {
     }
     return 'mh3';
   });
+  const [currentSetHasModel, setCurrentSetHasModel] = useState(() => {
+    // Initialize from localStorage if available
+    if (typeof window !== 'undefined') {
+      const hasModel = localStorage.getItem('selectedSetHasModel');
+      return hasModel === 'true'; // Default to true if not set
+    }
+    return true;
+  });
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Card viewer state
@@ -73,7 +81,10 @@ export default function PlayPage() {
   };
 
   const handleToggleAiPrediction = () => {
-    setIsAiPredictionEnabled(prev => !prev);
+    // Only allow toggling if the current set has a model
+    if (currentSetHasModel) {
+      setIsAiPredictionEnabled(prev => !prev);
+    }
   };
 
   // Function to map DOMRect to our simpler HoverPosition type
@@ -162,7 +173,11 @@ export default function PlayPage() {
     const savedSettings = loadSettings();
     if (savedSettings) {
       setIsHoverPreviewEnabled(savedSettings.isHoverPreviewEnabled);
-      setIsAiPredictionEnabled(savedSettings.isAiPredictionEnabled);
+      // Only enable AI prediction if the current set has a model
+      setIsAiPredictionEnabled(savedSettings.isAiPredictionEnabled && currentSetHasModel);
+    } else if (!currentSetHasModel) {
+      // If no saved settings and no model, ensure AI prediction is disabled
+      setIsAiPredictionEnabled(false);
     }
 
     // Check if this is a page refresh or new navigation
@@ -590,20 +605,28 @@ export default function PlayPage() {
                 {/* AI Prediction Toggle */}
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                    <label className={`block text-sm font-medium mb-1 ${
+                      currentSetHasModel ? 'text-gray-300' : 'text-gray-500'
+                    }`}>
                       AI Prediction
                     </label>
                     <p className="text-xs text-gray-500">
-                      Show AI pick predictions
+                      {currentSetHasModel ? 'Show AI pick predictions' : 'Not available for this set (BETA)'}
                     </p>
                   </div>
                   <button
                     onClick={handleToggleAiPrediction}
-                    className={`relative inline-flex flex-shrink-0 h-7 w-12 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 focus:ring-offset-gray-800 ${
-                      isAiPredictionEnabled ? 'bg-purple-600' : 'bg-gray-600'
+                    disabled={!currentSetHasModel}
+                    className={`relative inline-flex flex-shrink-0 h-7 w-12 border-2 border-transparent rounded-full transition-colors ease-in-out duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 focus:ring-offset-gray-800 ${
+                      !currentSetHasModel
+                        ? 'bg-gray-700 cursor-not-allowed opacity-50'
+                        : isAiPredictionEnabled
+                        ? 'bg-purple-600 cursor-pointer'
+                        : 'bg-gray-600 cursor-pointer'
                     }`}
                     role="switch"
                     aria-checked={isAiPredictionEnabled}
+                    aria-disabled={!currentSetHasModel}
                   >
                     <span
                       aria-hidden="true"
