@@ -7,11 +7,29 @@ export interface Card {
   columnId?: number; // Which column the card is assigned to (for manual organization)
   set_code?: string; // Set code for Arena format export
   collector_number?: string; // Collector number for Arena format export
+  mana_cost?: string; // e.g. "{1}{G}"
+  types?: string[];
+  subtypes?: string[];
+  rarity?: string;
+  power?: number | null;
+  toughness?: number | null;
+  oracle_text?: string;
+}
+
+export interface BoosterCard {
+  name: string;
+  mana_cost: string;
+  cmc: number;
+  types: string[];
+  subtypes: string[];
+  rarity: string;
+  power: number | null;
+  toughness: number | null;
+  oracle_text: string;
 }
 
 export interface BoosterData {
-  // Corrected structure based on the console error report
-  pack: string[];
+  pack: BoosterCard[];
   set: string;
   count: number;
 }

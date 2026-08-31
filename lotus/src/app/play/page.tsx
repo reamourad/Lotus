@@ -133,11 +133,11 @@ export default function PlayPage() {
     lastPredictionPackKey.current = ''; // Reset prediction tracking for new draft
 
     try {
-      // Fetch all 8 packs in PARALLEL for speed. Only the human player's
-      // pack (index 0) is ever rendered, so only it needs Scryfall detail
-      // (image/CMC) — bots only use card names via makeBotPick.
-      const packPromises = Array.from({ length: 8 }, (_, index) =>
-        fetchPackAsCards(currentSet, index === 0)
+      // Fetch all 8 packs in PARALLEL for speed. /booster already returns
+      // mana cost/CMC/type per card (from MTGJSON), so no Scryfall calls
+      // are needed here regardless of player.
+      const packPromises = Array.from({ length: 8 }, () =>
+        fetchPackAsCards(currentSet)
       );
 
       const packs = await Promise.all(packPromises);
@@ -402,11 +402,11 @@ export default function PlayPage() {
       // Show loading screen
       setLoading(true);
 
-      // Fetch all 8 packs in PARALLEL for speed. Only the human player's
-      // pack (index 0) is ever rendered, so only it needs Scryfall detail
-      // (image/CMC) — bots only use card names via makeBotPick.
-      const packPromises = Array.from({ length: 8 }, (_, index) =>
-        fetchPackAsCards(currentSet, index === 0)
+      // Fetch all 8 packs in PARALLEL for speed. /booster already returns
+      // mana cost/CMC/type per card (from MTGJSON), so no Scryfall calls
+      // are needed here regardless of player.
+      const packPromises = Array.from({ length: 8 }, () =>
+        fetchPackAsCards(currentSet)
       );
 
       const packs = await Promise.all(packPromises);

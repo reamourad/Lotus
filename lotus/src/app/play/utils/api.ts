@@ -29,16 +29,15 @@ export const preloadImages = (cards: Card[]): Promise<void> => {
 };
 
 /**
- * Helper function to add delay between requests
- */
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-/**
- * Helper function to fetch a pack and convert to Card objects
+ * Helper function to fetch a pack and convert to Card objects.
+ *
+ * The backend's /booster response already includes each card's mana cost,
+ * CMC, type, rarity, etc. (sourced from MTGJSON), so no per-card Scryfall
+ * lookup is needed just to know which "box" a card belongs in. Only the
+ * card art still comes from Scryfall, via the lazy-loaded image proxy URL.
  * @param currentSet - The set code to fetch packs from
- * @param fetchDetails - Whether to fetch detailed card data (images, CMC) from Scryfall
  */
-export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean = true): Promise<Card[]> => {
+export const fetchPackAsCards = async (currentSet: string): Promise<Card[]> => {
   const response = await fetch(`${API_BASE_URL}/booster?set=${currentSet}`);
   if (!response.ok) {
     throw new Error(`Failed to load booster pack (HTTP status: ${response.status})`);
@@ -49,99 +48,21 @@ export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean
     throw new Error("Invalid API response: 'pack' array is missing or malformed.");
   }
 
-  // If we don't need details, just create basic card objects
-  if (!fetchDetails) {
-    return data.pack.map((cardName, index) => ({
-      name: cardName,
-      imageUrl: getScryfallImageUrl(cardName),
-      id: `${cardName}-${Date.now()}-${index}`,
-      cmc: 0,
-      set_code: data.set,
-      collector_number: undefined,
-    }));
-  }
-
-  // Fetch card data sequentially with delays to respect rate limits
-  const cards: Card[] = [];
-  for (let i = 0; i < data.pack.length; i++) {
-    const cardName = data.pack[i];
-
-    try {
-      const scryfallResponse = await fetch(
-        `/api/scryfall?cardName=${encodeURIComponent(cardName)}&set=${data.set}`
-      );
-
-      if (scryfallResponse.ok) {
-        const cardData = await scryfallResponse.json();
-
-        // Use the image URI from Scryfall API response (CDN URLs, no CORS issues)
-        // Handle both regular cards and double-faced cards
-        let imageUrl: string | undefined;
-
-        // Try to get the image from regular image_uris
-        if (cardData.image_uris) {
-          imageUrl = cardData.image_uris[SCRYFALL_IMAGE_VERSION] ||
-                     cardData.image_uris.normal ||
-                     cardData.image_uris.large ||
-                     cardData.image_uris.small;
-        }
-
-        // For double-faced cards, use the front face image
-        if (!imageUrl && cardData.card_faces && cardData.card_faces.length > 0) {
-          const frontFace = cardData.card_faces[0];
-          if (frontFace.image_uris) {
-            imageUrl = frontFace.image_uris[SCRYFALL_IMAGE_VERSION] ||
-                       frontFace.image_uris.normal ||
-                       frontFace.image_uris.large ||
-                       frontFace.image_uris.small;
-          }
-        }
-
-        // Final fallback: use our proxy endpoint
-        if (!imageUrl) {
-          console.warn(`No CDN image URL found for ${cardName}, using proxy`);
-          imageUrl = getScryfallImageUrl(cardName);
-        }
-
-        cards.push({
-          name: cardName,
-          imageUrl,
-          id: `${cardName}-${Date.now()}-${i}`,
-          cmc: cardData.cmc || 0,
-          set_code: cardData.set || data.set,
-          collector_number: cardData.collector_number,
-        });
-      } else {
-        // API error, use fallback
-        cards.push({
-          name: cardName,
-          imageUrl: getScryfallImageUrl(cardName),
-          id: `${cardName}-${Date.now()}-${i}`,
-          cmc: 0,
-          set_code: data.set,
-          collector_number: undefined,
-        });
-      }
-    } catch (error) {
-      console.error(`Error fetching card data for ${cardName}:`, error);
-      // Fallback: use proxy endpoint
-      cards.push({
-        name: cardName,
-        imageUrl: getScryfallImageUrl(cardName),
-        id: `${cardName}-${Date.now()}-${i}`,
-        cmc: 0,
-        set_code: data.set,
-        collector_number: undefined,
-      });
-    }
-
-    // Small delay between requests (client-side throttling as additional safety)
-    if (i < data.pack.length - 1) {
-      await delay(50);
-    }
-  }
-
-  return cards;
+  return data.pack.map((card, index) => ({
+    name: card.name,
+    imageUrl: getScryfallImageUrl(card.name),
+    id: `${card.name}-${Date.now()}-${index}`,
+    cmc: card.cmc || 0,
+    set_code: data.set,
+    collector_number: undefined,
+    mana_cost: card.mana_cost,
+    types: card.types,
+    subtypes: card.subtypes,
+    rarity: card.rarity,
+    power: card.power,
+    toughness: card.toughness,
+    oracle_text: card.oracle_text,
+  }));
 };
 
 /**
