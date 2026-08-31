@@ -1,5 +1,5 @@
 import { Card, BoosterData, Player } from '../types';
-import { SCRYFALL_IMAGE_VERSION } from './constants';
+import { SCRYFALL_IMAGE_VERSION, API_BASE_URL } from './constants';
 
 /**
  * Generates a URL to our proxy that fetches the card image from Scryfall.
@@ -39,7 +39,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * @param fetchDetails - Whether to fetch detailed card data (images, CMC) from Scryfall
  */
 export const fetchPackAsCards = async (currentSet: string, fetchDetails: boolean = true): Promise<Card[]> => {
-  const response = await fetch(`https://mtgdraftassistant.onrender.com/booster?set=${currentSet}`);
+  const response = await fetch(`${API_BASE_URL}/booster?set=${currentSet}`);
   if (!response.ok) {
     throw new Error(`Failed to load booster pack (HTTP status: ${response.status})`);
   }
@@ -152,7 +152,7 @@ export const makeBotPick = async (player: Player, currentSet: string): Promise<C
     const packCardNames = player.currentPack.map(c => c.name);
     const deckCardNames = player.picks.map(c => c.name);
 
-    const response = await fetch('https://mtgdraftassistant.onrender.com/predict', {
+    const response = await fetch(`${API_BASE_URL}/predict`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

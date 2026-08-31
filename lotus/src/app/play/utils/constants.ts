@@ -18,7 +18,7 @@ export const CARD_ASPECT_RATIO = 2.5 / 3.5;
 // For larger sizes (300px+), 'png' is essential for clarity
 export const SCRYFALL_IMAGE_VERSION = 'png';
 
-export const API_ENDPOINT = 'https://mtgdraftassistant.onrender.com/booster?set=MH3';
+export const API_BASE_URL = 'https://mourad-rea--mtg-draft-serving-fastapi-app.modal.run';
 
 // LocalStorage keys
 export const STORAGE_KEYS = {

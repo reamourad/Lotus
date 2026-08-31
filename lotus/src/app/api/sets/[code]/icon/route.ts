@@ -7,7 +7,7 @@ export async function GET(
   try {
     const { code } = params;
     const response = await fetch(
-      `https://mtgdraftassistant.onrender.com/sets/${code}/icon`
+      `https://mourad-rea--mtg-draft-serving-fastapi-app.modal.run/sets/${code}/icon`
     );
 
     if (!response.ok) {

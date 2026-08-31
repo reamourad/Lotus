@@ -7,7 +7,8 @@ import {
   DEFAULT_CARD_WIDTH,
   MIN_CARD_WIDTH,
   MAX_CARD_WIDTH,
-  HOVER_PREVIEW_STYLE
+  HOVER_PREVIEW_STYLE,
+  API_BASE_URL
 } from './utils/constants';
 import {
   saveDraftToLocalStorage,
@@ -132,9 +133,11 @@ export default function PlayPage() {
     lastPredictionPackKey.current = ''; // Reset prediction tracking for new draft
 
     try {
-      // Fetch all 8 packs in PARALLEL for speed
-      const packPromises = Array.from({ length: 8 }, () =>
-        fetchPackAsCards(currentSet, true)
+      // Fetch all 8 packs in PARALLEL for speed. Only the human player's
+      // pack (index 0) is ever rendered, so only it needs Scryfall detail
+      // (image/CMC) — bots only use card names via makeBotPick.
+      const packPromises = Array.from({ length: 8 }, (_, index) =>
+        fetchPackAsCards(currentSet, index === 0)
       );
 
       const packs = await Promise.all(packPromises);
@@ -266,13 +269,13 @@ export default function PlayPage() {
       };
 
       console.log('=== AI PREDICTION API CALL ===');
-      console.log('URL:', 'https://mtgdraftassistant.onrender.com/predict');
+      console.log('URL:', `${API_BASE_URL}/predict`);
       console.log('Method:', 'POST');
       console.log('Request Body:', JSON.stringify(requestBody, null, 2));
       console.log('Pack size:', packCardNames.length);
       console.log('Deck size:', deckCardNames.length);
 
-      const response = await fetch('https://mtgdraftassistant.onrender.com/predict', {
+      const response = await fetch(`${API_BASE_URL}/predict`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -399,9 +402,11 @@ export default function PlayPage() {
       // Show loading screen
       setLoading(true);
 
-      // Fetch all 8 packs in PARALLEL for speed
-      const packPromises = Array.from({ length: 8 }, () =>
-        fetchPackAsCards(currentSet, true)
+      // Fetch all 8 packs in PARALLEL for speed. Only the human player's
+      // pack (index 0) is ever rendered, so only it needs Scryfall detail
+      // (image/CMC) — bots only use card names via makeBotPick.
+      const packPromises = Array.from({ length: 8 }, (_, index) =>
+        fetchPackAsCards(currentSet, index === 0)
       );
 
       const packs = await Promise.all(packPromises);

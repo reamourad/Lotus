@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const response = await fetch('https://mtgdraftassistant.onrender.com/sets', { cache: 'no-store' });
+    const response = await fetch('https://mourad-rea--mtg-draft-serving-fastapi-app.modal.run/sets', { cache: 'no-store' });
 
     if (!response.ok) {
       return NextResponse.json(
