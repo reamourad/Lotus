@@ -1,18 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card } from '../types';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface DraftResultsProps {
   draftedCards: Card[];
   onRestartDraft: () => void;
-}
-
-interface ScryfallCardDetails extends Card {
-  colors?: string[];
-  type_line: string;
-  rarity: string;
 }
 
 const COLORS: { [key: string]: string } = {
@@ -37,74 +31,57 @@ const cardTypeEnum = {
 
 type CardType = typeof cardTypeEnum[keyof typeof cardTypeEnum];
 
-const getCardCategory = (card: ScryfallCardDetails): CardType | null => {
-    const typeLine = card.type_line;
-    if (typeLine.includes('Creature')) return cardTypeEnum.CREATURE;
-    if (typeLine.includes('Instant')) return cardTypeEnum.INSTANT;
-    if (typeLine.includes('Sorcery')) return cardTypeEnum.SORCERY;
-    if (typeLine.includes('Enchantment')) return cardTypeEnum.ENCHANTMENT;
-    if (typeLine.includes('Artifact')) return cardTypeEnum.ARTIFACT;
-    if (typeLine.includes('Planeswalker')) return cardTypeEnum.PLANESWALKER;
-    if (typeLine.includes('Land')) return cardTypeEnum.LAND;
+// The pack API already gives us `types` (from MTGJSON) for every drafted
+// card, so category grouping doesn't need a Scryfall type_line at all.
+const getCardCategory = (card: Card): CardType | null => {
+    const types = card.types || [];
+    if (types.includes('Creature')) return cardTypeEnum.CREATURE;
+    if (types.includes('Instant')) return cardTypeEnum.INSTANT;
+    if (types.includes('Sorcery')) return cardTypeEnum.SORCERY;
+    if (types.includes('Enchantment')) return cardTypeEnum.ENCHANTMENT;
+    if (types.includes('Artifact')) return cardTypeEnum.ARTIFACT;
+    if (types.includes('Planeswalker')) return cardTypeEnum.PLANESWALKER;
+    if (types.includes('Land')) return cardTypeEnum.LAND;
     return null;
+};
+
+// Mana cost pip letters double as color identity (including hybrid pips
+// like "{W/U}", which correctly count as both colors) — no Scryfall lookup
+// needed for the color pie chart either.
+const deriveColors = (manaCost?: string): string[] => {
+  if (!manaCost) return [];
+  const found = new Set<string>();
+  for (const letter of ['W', 'U', 'B', 'R', 'G']) {
+    if (manaCost.includes(letter)) found.add(letter);
+  }
+  return Array.from(found);
 };
 
 const TABS = ['All', ...Object.values(cardTypeEnum)];
 
 const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRestartDraft }) => {
-  const [detailedCards, setDetailedCards] = useState<ScryfallCardDetails[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('All');
 
-  useEffect(() => {
-    const fetchAllCardData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const promises = draftedCards.map(card =>
-          fetch(`/api/scryfall?cardName=${encodeURIComponent(card.name)}&set=${card.set_code || ''}`)
-            .then(res => {
-              if (!res.ok) throw new Error(`Failed for ${card.name}`);
-              return res.json();
-            })
-            .then(data => ({ ...card, ...data, id: card.id }))
-        );
-        const results = await Promise.all(promises);
-        setDetailedCards(results);
-      } catch (err) {
-        setError('Failed to load some card details. The developer has been notified and is on high alert, maybe.');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    if (draftedCards.length > 0) {
-      fetchAllCardData();
-    } else {
-      setLoading(false);
-    }
-  }, [draftedCards]);
-
   const {stats, groupedCards} = useMemo(() => {
-    if (detailedCards.length === 0) return {stats: null, groupedCards: {}};
+    if (draftedCards.length === 0) return {stats: null, groupedCards: {}};
 
     const colorCounts: { [key: string]: number } = { W: 0, U: 0, B: 0, R: 0, G: 0, M: 0, C: 0 };
     const manaCurve = new Array(7).fill(0); // 0-6, 7+
-    
-    const groupedCards: {[key: string]: ScryfallCardDetails[]} = {};
+
+    const groupedCards: {[key: string]: Card[]} = {};
     (Object.values(cardTypeEnum)).forEach(type => {
         groupedCards[type] = [];
     });
 
-    detailedCards.forEach(card => {
-      if (!card.colors || card.colors.length === 0) {
+    draftedCards.forEach(card => {
+      const colors = deriveColors(card.mana_cost);
+      if (colors.length === 0) {
         colorCounts.C++;
-      } else if (card.colors.length > 1) {
+      } else if (colors.length > 1) {
         colorCounts.M++;
       } else {
-        colorCounts[card.colors[0] as keyof typeof colorCounts]++;
+        colorCounts[colors[0] as keyof typeof colorCounts]++;
       }
 
       const cmc = Math.min(card.cmc, 6);
@@ -124,14 +101,14 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
       cost: i === 6 ? '6+' : `${i}`,
       count,
     }));
-    
-    const totalCards = detailedCards.length;
+
+    const totalCards = draftedCards.length;
     const creatureCount = groupedCards['Creatures'].length;
     const nonCreatureCount = totalCards - creatureCount;
-    const avgCmc = (detailedCards.reduce((acc, card) => acc + card.cmc, 0) / totalCards).toFixed(1);
+    const avgCmc = (draftedCards.reduce((acc, card) => acc + card.cmc, 0) / totalCards).toFixed(1);
 
     return { stats: { colorData, manaCurveData, creatureCount, nonCreatureCount, totalCards, avgCmc }, groupedCards };
-  }, [detailedCards]);
+  }, [draftedCards]);
 
   const formatForArena = () => {
     const cardCounts = new Map<string, { card: Card; count: number }>();
@@ -155,12 +132,6 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
     }
   };
 
-  if (loading) {
-    return <div className="text-center py-10">Loading draft results...</div>;
-  }
-  if (error) {
-    return <div className="text-center py-10 text-red-400">{error}</div>;
-  }
   if (!stats) {
     return <div className="text-center py-10">No cards were drafted.</div>;
   }
@@ -268,7 +239,7 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
             <h2 className="text-xl font-bold text-white mb-4">Drafted Card Pool</h2>
             <div className="flex border-b border-gray-700 mb-6 sticky top-0 bg-[#0f0b1a] z-10">
                 {TABS.map((type) => {
-                    const count = type === 'All' ? detailedCards.length : (groupedCards[type]?.length || 0);
+                    const count = type === 'All' ? draftedCards.length : (groupedCards[type]?.length || 0);
                     if(count === 0 && type !== 'All') return null;
                     return (
                         <button
@@ -289,7 +260,7 @@ const DraftResultsWithData: React.FC<DraftResultsProps> = ({ draftedCards, onRes
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-20">
-                {(activeTab === 'All' ? detailedCards : (groupedCards[activeTab] || [])).map((card) => (
+                {(activeTab === 'All' ? draftedCards : (groupedCards[activeTab] || [])).map((card) => (
                 <div 
                     key={`${activeTab}-${card.id}`} 
                     className="group relative aspect-[5/7] rounded-lg overflow-hidden bg-gray-800 border border-gray-700 hover:border-purple-500/50 hover:shadow-[0_0_15px_rgba(168,85,247,0.3)] transition-all duration-300 cursor-pointer"

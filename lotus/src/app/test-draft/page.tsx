@@ -70,13 +70,18 @@ const TestDraftPage: React.FC = () => {
     useEffect(() => {
         const fetchCardData = async () => {
             const parsedCards = parseCardList(testCardList);
-            const promises = parsedCards.map(card => 
+            const promises = parsedCards.map(card =>
                 fetch(`/api/scryfall?cardName=${encodeURIComponent(card.name!)}&set=${card.set_code || ''}`)
                 .then(res => res.json())
                 .then(data => ({
                     ...card,
                     imageUrl: data.image_uris?.normal || '',
                     cmc: data.cmc || 0,
+                    mana_cost: data.mana_cost || '',
+                    // DraftResults now reads types/mana_cost instead of fetching
+                    // Scryfall itself, so this fixture needs to fake them too —
+                    // type_line looks like "Legendary Creature — Human Wizard".
+                    types: (data.type_line || '').split('—')[0].trim().split(/\s+/).filter(Boolean),
                 } as Card))
             );
             const results = await Promise.all(promises);
