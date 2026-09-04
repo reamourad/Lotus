@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from "@/components/Header";
-import { Card, DraftState, HoverPosition, Player, Settings } from './types';
+import { Card, DraftState, HoverPosition, ModelInfo, Player, Settings } from './types';
 import {
   DEFAULT_CARD_WIDTH,
   MIN_CARD_WIDTH,
@@ -20,7 +20,9 @@ import {
 import {
   preloadImages,
   fetchPackAsCards,
-  makeBotPick
+  fetchModels,
+  makeBotPick,
+  modelLabel
 } from './utils/api';
 import { CardHoverPreview } from './components/CardHoverPreview';
 import { BoosterGrid } from './components/BoosterGrid';
@@ -68,6 +70,17 @@ export default function PlayPage() {
   const predictionAbortController = useRef<AbortController | null>(null);
   const lastPredictionPackKey = useRef<string>('');
 
+  // Which trained model answers /predict. null means "let the backend use its default".
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('selectedModelId');
+    }
+    return null;
+  });
+  const selectedModelIdRef = useRef<string | null>(selectedModelId);
+  selectedModelIdRef.current = selectedModelId;
+
   // Determine if draft is complete
   const isDraftComplete = draftState && draftState.currentBooster === 3 && draftState.players.every(p => p.currentPack.length === 0);
 
@@ -86,6 +99,14 @@ export default function PlayPage() {
     if (currentSetHasModel) {
       setIsAiPredictionEnabled(prev => !prev);
     }
+  };
+
+  // Changing the model invalidates whatever the previous one predicted for
+  // this pack, so clear it and let the effect re-request.
+  const handleSelectModel = (modelId: string) => {
+    setSelectedModelId(modelId);
+    setAiPredictions(null);
+    lastPredictionPackKey.current = '';
   };
 
   // Function to map DOMRect to our simpler HoverPosition type
@@ -226,9 +247,34 @@ export default function PlayPage() {
     const settings: Settings = {
       isHoverPreviewEnabled,
       isAiPredictionEnabled,
+      selectedModelId,
     };
     saveSettings(settings);
-  }, [isHoverPreviewEnabled, isAiPredictionEnabled]);
+    if (selectedModelId) {
+      localStorage.setItem('selectedModelId', selectedModelId);
+    } else {
+      localStorage.removeItem('selectedModelId');
+    }
+  }, [isHoverPreviewEnabled, isAiPredictionEnabled, selectedModelId]);
+
+  // Load the servable models once. A stored choice that no longer exists
+  // (its run was replaced) falls back to the backend's current default.
+  useEffect(() => {
+    let cancelled = false;
+    fetchModels()
+      .then(({ models, defaultModelId }) => {
+        if (cancelled) return;
+        setAvailableModels(models);
+        setSelectedModelId(previous => {
+          if (previous && models.some(m => m.model_id === previous)) {
+            return previous;
+          }
+          return defaultModelId ?? (models[0]?.model_id ?? null);
+        });
+      })
+      .catch(error => console.error('Failed to load model list:', error));
+    return () => { cancelled = true; };
+  }, []);
 
   // Handle clicking a card in the booster (selection)
   const handleCardSelection = (card: Card) => {
@@ -266,6 +312,7 @@ export default function PlayPage() {
         pack: packCardNames,
         deck: deckCardNames,
         set: currentSet,
+        ...(selectedModelId ? { model: selectedModelId } : {}),
       };
 
       console.log('=== AI PREDICTION API CALL ===');
@@ -312,7 +359,7 @@ export default function PlayPage() {
       }
       console.error('Error fetching AI predictions:', error);
     }
-  }, [draftState, boosterCards, pickedCards, currentSet]);
+  }, [draftState, boosterCards, pickedCards, currentSet, selectedModelId]);
 
   // Fetch predictions when booster cards change
   useEffect(() => {
@@ -320,7 +367,7 @@ export default function PlayPage() {
       fetchAiPredictions();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boosterCards, loading, isDraftComplete, isAiPredictionEnabled]);
+  }, [boosterCards, loading, isDraftComplete, isAiPredictionEnabled, selectedModelId]);
 
   // Process all picks for the current round
   const processRound = async () => {
@@ -332,7 +379,7 @@ export default function PlayPage() {
     const botPickPromises = updatedPlayers
       .filter(p => !p.isHuman && p.currentPack.length > 0)
       .map(async (player) => {
-        const pickedCard = await makeBotPick(player, currentSet);
+        const pickedCard = await makeBotPick(player, currentSet, selectedModelIdRef.current);
         return { playerId: player.id, pickedCard };
       });
 
@@ -641,6 +688,35 @@ export default function PlayPage() {
                     />
                   </button>
                 </div>
+
+                {/* Model picker: which trained model answers the predictions */}
+                {availableModels.length > 1 && (
+                  <div>
+                    <label htmlFor="model-select" className={`block text-sm font-medium mb-1 ${
+                      currentSetHasModel ? 'text-gray-300' : 'text-gray-500'
+                    }`}>
+                      Model
+                    </label>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Which trained model makes the picks
+                    </p>
+                    <select
+                      id="model-select"
+                      value={selectedModelId ?? ''}
+                      onChange={(e) => handleSelectModel(e.target.value)}
+                      disabled={!currentSetHasModel}
+                      className={`w-full rounded-md border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                        !currentSetHasModel ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                      }`}
+                    >
+                      {availableModels.map((model) => (
+                        <option key={model.model_id} value={model.model_id}>
+                          {modelLabel(model)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
           </div>

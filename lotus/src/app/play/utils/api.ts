@@ -1,4 +1,4 @@
-import { Card, BoosterData, Player } from '../types';
+import { Card, BoosterData, ModelInfo, Player } from '../types';
 import { SCRYFALL_IMAGE_VERSION, API_BASE_URL } from './constants';
 
 /**
@@ -66,9 +66,39 @@ export const fetchPackAsCards = async (currentSet: string): Promise<Card[]> => {
 };
 
 /**
+ * Fetches every trained model the backend can serve. Goes through our own
+ * proxy route so the browser never has to reach the Modal host directly.
+ */
+export const fetchModels = async (): Promise<{ models: ModelInfo[]; defaultModelId: string | null }> => {
+  const response = await fetch('/api/models', { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Failed to load models (HTTP status: ${response.status})`);
+  }
+  const data = await response.json();
+  const models: ModelInfo[] = Array.isArray(data.models) ? data.models.filter((m: ModelInfo) => m.loaded) : [];
+  return { models, defaultModelId: data.default_model_id ?? null };
+};
+
+/**
+ * Short human-readable label for a model, e.g. "v3 graph — 40.9% on an unseen set".
+ */
+export const modelLabel = (model: ModelInfo): string => {
+  const name = model.version.replace(/_/g, ' ');
+  const holdout = model.metrics?.holdout?.top_1_accuracy;
+  const fold = model.metrics?.fold?.top_1_accuracy;
+  if (typeof holdout === 'number') {
+    return `${name} — ${(holdout * 100).toFixed(1)}% on an unseen set`;
+  }
+  if (typeof fold === 'number') {
+    return `${name} — ${(fold * 100).toFixed(1)}% top pick`;
+  }
+  return name;
+};
+
+/**
  * Bot makes a pick using the /predict endpoint
  */
-export const makeBotPick = async (player: Player, currentSet: string): Promise<Card> => {
+export const makeBotPick = async (player: Player, currentSet: string, modelId?: string | null): Promise<Card> => {
   try {
     const packCardNames = player.currentPack.map(c => c.name);
     const deckCardNames = player.picks.map(c => c.name);
@@ -82,6 +112,7 @@ export const makeBotPick = async (player: Player, currentSet: string): Promise<C
         pack: packCardNames,
         deck: deckCardNames,
         set: currentSet,
+        ...(modelId ? { model: modelId } : {}),
       }),
     });
 

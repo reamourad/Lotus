@@ -58,4 +58,19 @@ export interface HoverPosition {
 export interface Settings {
   isAiPredictionEnabled: boolean;
   isHoverPreviewEnabled: boolean;
+  selectedModelId?: string | null;
+}
+
+export interface ModelInfo {
+  model_id: string;
+  version: string;
+  description: string;
+  train_sets: string[];
+  held_out_sets: string[];
+  loaded: boolean;
+  is_default: boolean;
+  metrics: {
+    fold: { top_1_accuracy?: number; mrr?: number } | null;
+    holdout: { top_1_accuracy?: number; mrr?: number } | null;
+  };
 }
