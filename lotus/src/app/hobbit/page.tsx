@@ -2,14 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Header from '@/components/Header';
-import { Card, ModelInfo } from '../play/types';
-import {
-  bestPerVersion,
-  fetchModels,
-  fetchPackAsCards,
-  fetchPredictions,
-  getScryfallImageUrl,
-} from '../play/utils/api';
+import { Card, HoverPosition, ModelInfo } from '../play/types';
+import { DEFAULT_CARD_WIDTH, MAX_CARD_WIDTH, MIN_CARD_WIDTH } from '../play/utils/constants';
+import { bestPerVersion, fetchModels, fetchPackAsCards, fetchPredictions } from '../play/utils/api';
+import { BoosterGrid } from '../play/components/BoosterGrid';
+import { CardHoverPreview } from '../play/components/CardHoverPreview';
+import { CardViewer } from '../play/components/CardViewer';
+import { ManaCurveDisplay } from '../play/components/ManaCurveDisplay';
 
 const SET_CODE = 'HOB';
 const PACKS_PER_DRAFT = 3;
@@ -26,68 +25,41 @@ const VERSION_BLURBS: Record<string, string> = {
   v3_graph: 'Reads a parsed graph of the rules text',
 };
 
-// One colour per model so a card's badges and its column read as the same thing.
-const VERSION_COLORS: Record<string, { text: string; badge: string; ring: string }> = {
-  v1_pointwise: { text: 'text-sky-300', badge: 'bg-sky-500/90 text-sky-950', ring: 'ring-sky-400' },
-  v2_value_head: { text: 'text-amber-300', badge: 'bg-amber-500/90 text-amber-950', ring: 'ring-amber-400' },
-  v3_graph: { text: 'text-emerald-300', badge: 'bg-emerald-500/90 text-emerald-950', ring: 'ring-emerald-400' },
-};
-
-const FALLBACK_COLORS = { text: 'text-gray-300', badge: 'bg-gray-500/90 text-gray-950', ring: 'ring-gray-400' };
-const colorsFor = (version: string) => VERSION_COLORS[version] ?? FALLBACK_COLORS;
 const labelFor = (version: string) => VERSION_LABELS[version] ?? version.replace(/_/g, ' ');
 
-type Ranking = Map<string, { rank: number; probability: number }>;
-
-/**
- * A model's confidence is a softmax over the pack, so its top pick can hold
- * almost all of it and everything else lands far below a tenth of a percent.
- * Scale the precision to the value so the low cards still say something.
- */
-const formatPercent = (probability: number): string => {
-  const percent = probability * 100;
-  if (percent >= 10) return `${percent.toFixed(0)}%`;
-  if (percent >= 1) return `${percent.toFixed(1)}%`;
-  if (percent >= 0.01) return `${percent.toFixed(2)}%`;
-  return percent > 0 ? '<0.01%' : '0%';
-};
+type Prediction = { card_name: string; probability: number };
 
 interface ModelState {
   model: ModelInfo;
-  ranking: Ranking | null;
+  predictions: Prediction[] | null;
   loading: boolean;
   error: string | null;
 }
-
-const rankingFrom = (predictions: Array<{ card_name: string; probability: number }>): Ranking => {
-  const ranking: Ranking = new Map();
-  predictions.forEach((prediction, index) => {
-    // A pack can hold two copies of a card; the first entry is the better rank.
-    if (!ranking.has(prediction.card_name)) {
-      ranking.set(prediction.card_name, { rank: index + 1, probability: prediction.probability });
-    }
-  });
-  return ranking;
-};
 
 export default function HobbitComparisonPage() {
   const [modelStates, setModelStates] = useState<ModelState[]>([]);
   const [pack, setPack] = useState<Card[]>([]);
   const [pool, setPool] = useState<Card[]>([]);
   const [packNumber, setPackNumber] = useState(1);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [hoveredCard, setHoveredCard] = useState<{ card: Card; position: HoverPosition } | null>(null);
+  const [viewedCardIndex, setViewedCardIndex] = useState<number | null>(null);
+  const [cardWidth, setCardWidth] = useState(DEFAULT_CARD_WIDTH);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hoveredCard, setHoveredCard] = useState<Card | null>(null);
-  // Which model's numbers are drawn on the cards. Clicking a model's box
-  // switches to it; clicking the selected one again clears the overlay.
+  // Which model's numbers sit on the cards. Clicking a model's box switches to
+  // it; clicking the selected one again clears the overlay.
   const [shownModelId, setShownModelId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const models = useMemo(() => modelStates.map(state => state.model), [modelStates]);
+  const shownState = modelStates.find(state => state.model.model_id === shownModelId) ?? null;
 
   const loadPack = useCallback(async () => {
     const cards = await fetchPackAsCards(SET_CODE);
     setPack(cards);
+    setSelectedCardId(null);
     return cards;
   }, []);
 
@@ -95,7 +67,7 @@ export default function HobbitComparisonPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [{ models: loaded }] = await Promise.all([fetchModels(), Promise.resolve()]);
+        const { models: loaded } = await fetchModels();
         const chosen = bestPerVersion(loaded);
         if (cancelled) return;
         if (chosen.length === 0) {
@@ -103,7 +75,7 @@ export default function HobbitComparisonPage() {
           setLoading(false);
           return;
         }
-        setModelStates(chosen.map(model => ({ model, ranking: null, loading: true, error: null })));
+        setModelStates(chosen.map(model => ({ model, predictions: null, loading: true, error: null })));
         setShownModelId(chosen[0].model_id);
         await loadPack();
       } catch (e) {
@@ -134,7 +106,7 @@ export default function HobbitComparisonPage() {
           if (controller.signal.aborted) return;
           setModelStates(previous => previous.map(state => (
             state.model.model_id === model.model_id
-              ? { ...state, ranking: rankingFrom(predictions), loading: false, error: null }
+              ? { ...state, predictions, loading: false, error: null }
               : state
           )));
         })
@@ -142,7 +114,7 @@ export default function HobbitComparisonPage() {
           if (controller.signal.aborted || e?.name === 'AbortError') return;
           setModelStates(previous => previous.map(state => (
             state.model.model_id === model.model_id
-              ? { ...state, ranking: null, loading: false, error: 'no answer' }
+              ? { ...state, predictions: null, loading: false, error: 'no answer' }
               : state
           )));
         });
@@ -152,32 +124,48 @@ export default function HobbitComparisonPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pack, pool, models.length]);
 
-  const handlePick = async (card: Card) => {
+  const handleCardSelection = (card: Card) => {
+    setSelectedCardId(card.id === selectedCardId ? null : card.id);
+  };
+
+  const handleCardHover = useCallback((card: Card, rect: DOMRect) => {
+    setHoveredCard({ card, position: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } });
+  }, []);
+
+  const handleMouseLeave = useCallback(() => setHoveredCard(null), []);
+
+  const handleConfirmPick = async () => {
+    const card = pack.find(c => c.id === selectedCardId);
+    if (!card) return;
+
     const remaining = pack.filter(c => c.id !== card.id);
     setPool(previous => [...previous, card]);
     setHoveredCard(null);
-    if (remaining.length === 0) {
-      if (packNumber >= PACKS_PER_DRAFT) {
-        setPack([]);
-        return;
-      }
-      setPackNumber(n => n + 1);
-      setLoading(true);
-      try {
-        await loadPack();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to open the next pack.');
-      } finally {
-        setLoading(false);
-      }
+    setSelectedCardId(null);
+
+    if (remaining.length > 0) {
+      setPack(remaining);
       return;
     }
-    setPack(remaining);
+    if (packNumber >= PACKS_PER_DRAFT) {
+      setPack([]);
+      return;
+    }
+    setPackNumber(n => n + 1);
+    setLoading(true);
+    try {
+      await loadPack();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to open the next pack.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRestart = async () => {
     setPool([]);
     setPackNumber(1);
+    setSelectedCardId(null);
     setError(null);
     setLoading(true);
     try {
@@ -189,183 +177,245 @@ export default function HobbitComparisonPage() {
     }
   };
 
-  const topPickOf = (state: ModelState): { card: Card; probability: number } | null => {
-    if (!state.ranking) return null;
-    let best: { card: Card; probability: number } | null = null;
-    pack.forEach((card) => {
-      const entry = state.ranking!.get(card.name);
-      if (entry && entry.rank === 1) best = { card, probability: entry.probability };
-    });
-    return best;
-  };
+  const sortedPool = useMemo(() => [...pool].sort((a, b) => a.cmc - b.cmc), [pool]);
 
-  const topPicks = modelStates.map(topPickOf);
-  const namedTopPicks = topPicks.filter(Boolean).map(p => p!.card.name);
-  const allAgree = namedTopPicks.length > 1 && new Set(namedTopPicks).size === 1;
+  const handleCardView = useCallback((card: Card) => {
+    const index = sortedPool.findIndex(c => c.id === card.id);
+    if (index !== -1) setViewedCardIndex(index);
+  }, [sortedPool]);
+
+  const handlePreviousCard = useCallback(() => {
+    if (viewedCardIndex !== null && sortedPool.length > 0) {
+      setViewedCardIndex(viewedCardIndex === 0 ? sortedPool.length - 1 : viewedCardIndex - 1);
+    }
+  }, [viewedCardIndex, sortedPool.length]);
+
+  const handleNextCard = useCallback(() => {
+    if (viewedCardIndex !== null && sortedPool.length > 0) {
+      setViewedCardIndex(viewedCardIndex === sortedPool.length - 1 ? 0 : viewedCardIndex + 1);
+    }
+  }, [viewedCardIndex, sortedPool.length]);
+
+  const topPicks = modelStates
+    .map(state => state.predictions?.[0]?.card_name)
+    .filter((name): name is string => Boolean(name));
+  const distinctTopPicks = Array.from(new Set(topPicks));
   const draftComplete = pack.length === 0 && !loading && pool.length > 0;
+  const isPickReady = selectedCardId !== null;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
-      <Header activeTab="hobbit" boosterNumber={packNumber} pickNumber={pool.length % 14 + 1} />
+    <>
+      <Header
+        onSettingsClick={() => setIsSettingsOpen(true)}
+        activeTab="hobbit"
+        boosterNumber={packNumber}
+        pickNumber={(pool.length % 14) + 1}
+      />
 
-      <main className="mx-auto max-w-7xl px-4 py-6">
-        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-medium">The Hobbit — model comparison</h1>
-            <p className="mt-1 text-sm text-gray-400">
-              Every model ranks the same pack against the same pool. Pick a card to move the draft on
-              and watch where they disagree.
-            </p>
-          </div>
-          <button
-            onClick={handleRestart}
-            className="rounded-md border border-gray-600 px-4 py-2 text-sm text-gray-200 transition-colors hover:border-gray-400 hover:bg-gray-800"
-          >
-            New draft
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-6 rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
-        )}
-
-        {/* One column per model: its top pick, its confidence, and how it scored */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {modelStates.map((state) => {
-            const colors = colorsFor(state.model.version);
-            const top = topPickOf(state);
-            const holdout = state.model.metrics?.holdout?.top_1_accuracy;
-            const isShown = state.model.model_id === shownModelId;
-            return (
-              <button
-                key={state.model.model_id}
-                type="button"
-                onClick={() => setShownModelId(isShown ? null : state.model.model_id)}
-                aria-pressed={isShown}
-                className={`rounded-xl border bg-gray-800/60 p-4 text-left transition-colors ${
-                  isShown ? `border-transparent ring-2 ${colors.ring}` : 'border-gray-700 hover:border-gray-500'
-                }`}
+      <div
+        className="min-h-screen font-sans flex flex-col relative overflow-hidden"
+        style={{ background: 'radial-gradient(circle at top, #1a0a2e 0%, #0a0a0a 40%)' }}
+      >
+        <main className="px-4 md:px-8 pt-2 pb-4 flex-grow relative z-10">
+          {isSettingsOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setIsSettingsOpen(false)}>
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div
+                className="relative w-full max-w-md rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-baseline justify-between">
-                  <span className={`text-lg font-medium ${colors.text}`}>{labelFor(state.model.version)}</span>
-                  {typeof holdout === 'number' && (
-                    <span className="text-xs text-gray-400">{(holdout * 100).toFixed(1)}% on an unseen set</span>
-                  )}
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-white">Settings</h2>
+                  <button
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white"
+                    aria-label="Close Settings"
+                  >
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  {VERSION_BLURBS[state.model.version] ?? state.model.description}
-                </p>
-                <div className="mt-3 min-h-[3.5rem]">
-                  {state.loading && <p className="text-sm text-gray-500">thinking…</p>}
-                  {!state.loading && state.error && <p className="text-sm text-red-300">{state.error}</p>}
-                  {!state.loading && !state.error && top && (
-                    <>
-                      <p className="text-base text-gray-100">{top.card.name}</p>
-                      <p className="text-xs text-gray-400">{(top.probability * 100).toFixed(1)}% confidence</p>
-                    </>
-                  )}
-                  {!state.loading && !state.error && !top && pack.length > 0 && (
-                    <p className="text-sm text-gray-500">no pick</p>
-                  )}
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-gray-300">Card Size</label>
+                  <input
+                    type="range"
+                    min={MIN_CARD_WIDTH}
+                    max={MAX_CARD_WIDTH}
+                    value={cardWidth}
+                    onChange={(e) => setCardWidth(Number(e.target.value))}
+                    className="slider h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-700"
+                    style={{
+                      background: `linear-gradient(to right, #9333ea 0%, #9333ea ${((cardWidth - MIN_CARD_WIDTH) / (MAX_CARD_WIDTH - MIN_CARD_WIDTH)) * 100}%, #4b5563 ${((cardWidth - MIN_CARD_WIDTH) / (MAX_CARD_WIDTH - MIN_CARD_WIDTH)) * 100}%, #4b5563 100%)`,
+                    }}
+                  />
                 </div>
-                <p className="mt-3 text-xs text-gray-500">
-                  {isShown ? 'Showing its numbers on the pack' : 'Click to show its numbers on the pack'}
-                </p>
-              </button>
-            );
-          })}
-          {modelStates.length < 3 && (
-            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-800/30 p-4">
-              <span className="text-lg font-medium text-gray-500">v2</span>
-              <p className="mt-1 text-xs text-gray-600">
-                Still training. It appears here on its own once the run finishes.
-              </p>
+              </div>
             </div>
           )}
-        </div>
 
-        {namedTopPicks.length > 1 && (
-          <p className="mb-4 text-sm text-gray-400">
-            {allAgree
-              ? 'All models want the same card here.'
-              : `The models disagree: ${Array.from(new Set(namedTopPicks)).join(', ')}.`}
-          </p>
-        )}
-
-        {loading && <p className="text-sm text-gray-500">Opening a pack…</p>}
-
-        {draftComplete && (
-          <div className="rounded-xl border border-gray-700 bg-gray-800/60 p-6 text-center">
-            <p className="text-lg">Draft finished with {pool.length} cards.</p>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-white">The Hobbit — model comparison</h1>
+              <p className="mt-1 text-sm text-gray-400">
+                Every model ranks the same pack against the same pool. Click a model to put its numbers on the cards.
+              </p>
+            </div>
             <button
               onClick={handleRestart}
-              className="mt-4 rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-500"
+              className="rounded-full border border-gray-600 px-5 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-purple-500 hover:text-white"
             >
-              Draft again
+              New draft
             </button>
           </div>
-        )}
 
-        {/* The pack. Each card carries one badge per model showing that model's rank for it. */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
-          {pack.map((card) => {
-            const shown = modelStates.find(state => state.model.model_id === shownModelId);
-            const entry = shown?.ranking?.get(card.name);
-            const isAnyTop = entry?.rank === 1;
-            return (
-              <button
-                key={card.id}
-                onClick={() => handlePick(card)}
-                onMouseEnter={() => setHoveredCard(card)}
-                onMouseLeave={() => setHoveredCard(null)}
-                className={`group relative overflow-hidden rounded-lg border transition-transform hover:scale-105 ${
-                  isAnyTop ? 'border-gray-400' : 'border-gray-700'
-                }`}
-                title={`Pick ${card.name}`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={getScryfallImageUrl(card.name)}
-                  alt={card.name}
-                  loading="lazy"
-                  className="aspect-[5/7] w-full object-cover"
-                />
-                {/* The selected model's number, along the bottom so it never
-                    covers the card's own name, mana cost or art. */}
-                {shown && entry && (
-                  <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gray-950/80 px-1 py-1">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${colorsFor(shown.model.version).badge}`}
-                      title={`${labelFor(shown.model.version)} ranks this #${entry.rank}`}
-                    >
-                      {labelFor(shown.model.version)} #{entry.rank} · {formatPercent(entry.probability)}
-                    </span>
+          {/* One box per model, and the box is the control for whose numbers show */}
+          <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {modelStates.map((state) => {
+              const top = state.predictions?.[0];
+              const holdout = state.model.metrics?.holdout?.top_1_accuracy;
+              const isShown = state.model.model_id === shownModelId;
+              return (
+                <button
+                  key={state.model.model_id}
+                  type="button"
+                  onClick={() => setShownModelId(isShown ? null : state.model.model_id)}
+                  aria-pressed={isShown}
+                  className={`rounded-xl border bg-gray-900/70 p-4 text-left transition-all ${
+                    isShown
+                      ? 'border-purple-500 shadow-lg shadow-purple-500/30'
+                      : 'border-gray-700 hover:border-gray-500'
+                  }`}
+                >
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-lg font-bold text-white">{labelFor(state.model.version)}</span>
+                    {typeof holdout === 'number' && (
+                      <span className="text-xs text-gray-400">{(holdout * 100).toFixed(1)}% on an unseen set</span>
+                    )}
                   </div>
-                )}
+                  <p className="mt-1 text-xs text-gray-500">
+                    {VERSION_BLURBS[state.model.version] ?? state.model.description}
+                  </p>
+                  <div className="mt-3 min-h-[3.25rem]">
+                    {state.loading && <p className="text-sm text-gray-500">thinking…</p>}
+                    {!state.loading && state.error && <p className="text-sm text-red-300">{state.error}</p>}
+                    {!state.loading && !state.error && top && (
+                      <>
+                        <p className="text-base text-gray-100">{top.card_name}</p>
+                        <p className="font-mono text-xs text-gray-400">{(top.probability * 100).toFixed(1)}%</p>
+                      </>
+                    )}
+                    {!state.loading && !state.error && !top && pack.length > 0 && (
+                      <p className="text-sm text-gray-500">no pick</p>
+                    )}
+                  </div>
+                  <p className="mt-3 text-xs text-gray-500">
+                    {isShown ? 'Showing its numbers on the pack' : 'Click to show its numbers'}
+                  </p>
+                </button>
+              );
+            })}
+            {modelStates.length > 0 && modelStates.length < 3 && (
+              <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/40 p-4">
+                <span className="text-lg font-bold text-gray-600">v2</span>
+                <p className="mt-1 text-xs text-gray-600">
+                  Still training. It appears here on its own once the run finishes.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {distinctTopPicks.length > 0 && (
+            <p className="mb-2 text-sm text-gray-400">
+              {distinctTopPicks.length === 1
+                ? `All models want ${distinctTopPicks[0]}.`
+                : `The models disagree: ${distinctTopPicks.join(', ')}.`}
+            </p>
+          )}
+
+          {error ? (
+            <div className="text-center text-red-500">
+              <h2 className="mt-10 text-2xl font-bold">Error Loading Data</h2>
+              <p>{error}</p>
+            </div>
+          ) : draftComplete ? (
+            <div className="mt-10 text-center">
+              <p className="text-xl text-white">Draft finished with {pool.length} cards.</p>
+              <button
+                onClick={handleRestart}
+                className="mt-4 rounded-full bg-purple-600 px-8 py-3 font-extrabold tracking-wider text-white shadow-lg shadow-purple-500/50 transition-all hover:bg-purple-700"
+              >
+                DRAFT AGAIN
               </button>
-            );
-          })}
-        </div>
+            </div>
+          ) : (
+            <>
+              {loading ? (
+                <div className="flex h-64 items-center justify-center text-xl text-purple-400">
+                  <div className="animate-pulse">Opening Booster Pack...</div>
+                </div>
+              ) : (
+                <>
+                  <BoosterGrid
+                    cards={pack}
+                    selectedCardId={selectedCardId}
+                    onCardClick={handleCardSelection}
+                    onCardHover={handleCardHover}
+                    onMouseLeave={handleMouseLeave}
+                    isHoverEnabled
+                    cardWidth={cardWidth}
+                    aiPredictions={shownState?.predictions ?? null}
+                  />
+
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      onClick={handleConfirmPick}
+                      className={`rounded-full px-8 py-3 font-extrabold tracking-wider text-white shadow-lg transition-all ${
+                        isPickReady
+                          ? 'bg-purple-600 shadow-purple-500/50 hover:bg-purple-700'
+                          : 'cursor-not-allowed bg-gray-700 text-gray-400'
+                      }`}
+                      disabled={!isPickReady}
+                    >
+                      CONFIRM PICK
+                    </button>
+                  </div>
+                </>
+              )}
+
+              <hr
+                className="my-8 -mx-4 border-yellow-500 md:-mx-8"
+                style={{
+                  borderWidth: '4px',
+                  boxShadow: '0 -8px 16px rgba(234, 179, 8, 0.5), 0 -4px 8px rgba(234, 179, 8, 0.3), 0 -2px 4px rgba(234, 179, 8, 0.2)',
+                }}
+              />
+
+              <ManaCurveDisplay
+                draftedCards={pool}
+                onReorder={setPool}
+                cardWidth={cardWidth}
+                onCardClick={handleCardView}
+              />
+            </>
+          )}
+        </main>
 
         {hoveredCard && (
-          <p className="mt-3 text-sm text-gray-400">{hoveredCard.name}</p>
+          <CardHoverPreview card={hoveredCard.card} cardPosition={hoveredCard.position} />
         )}
 
-        {pool.length > 0 && (
-          <section className="mt-10">
-            <h2 className="mb-3 text-lg font-medium">Your pool ({pool.length})</h2>
-            <div className="flex flex-wrap gap-2">
-              {pool.map(card => (
-                <span key={card.id} className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-300">
-                  {card.name}
-                </span>
-              ))}
-            </div>
-          </section>
+        {viewedCardIndex !== null && sortedPool[viewedCardIndex] && (
+          <CardViewer
+            card={sortedPool[viewedCardIndex]}
+            onClose={() => setViewedCardIndex(null)}
+            onPrevious={handlePreviousCard}
+            onNext={handleNextCard}
+            canGoPrevious={sortedPool.length > 1}
+            canGoNext={sortedPool.length > 1}
+          />
         )}
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
