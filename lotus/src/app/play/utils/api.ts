@@ -69,14 +69,42 @@ export const fetchPackAsCards = async (currentSet: string): Promise<Card[]> => {
  * Fetches every trained model the backend can serve. Goes through our own
  * proxy route so the browser never has to reach the Modal host directly.
  */
+const heldOutScore = (model: ModelInfo): number =>
+  model.metrics?.holdout?.top_1_accuracy ?? model.metrics?.fold?.top_1_accuracy ?? -1;
+
+/**
+ * One entry per training run, keeping that run's best-scoring fold. A run's
+ * folds differ only by which slice of drafts they trained on, so listing all
+ * of them just gives the reader several near-identical choices. Older models
+ * with no recorded metrics are dropped once any measured model exists.
+ */
+const pickOnePerRun = (models: ModelInfo[]): ModelInfo[] => {
+  const bestByRun = new Map<string, ModelInfo>();
+  models.forEach((model) => {
+    const runId = model.model_id.split('/')[0];
+    const incumbent = bestByRun.get(runId);
+    if (!incumbent || heldOutScore(model) > heldOutScore(incumbent)) {
+      bestByRun.set(runId, model);
+    }
+  });
+  const chosen = Array.from(bestByRun.values());
+  const measured = chosen.filter((m) => heldOutScore(m) >= 0);
+  return (measured.length > 0 ? measured : chosen).sort((a, b) => heldOutScore(b) - heldOutScore(a));
+};
+
 export const fetchModels = async (): Promise<{ models: ModelInfo[]; defaultModelId: string | null }> => {
   const response = await fetch('/api/models', { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`Failed to load models (HTTP status: ${response.status})`);
   }
   const data = await response.json();
-  const models: ModelInfo[] = Array.isArray(data.models) ? data.models.filter((m: ModelInfo) => m.loaded) : [];
-  return { models, defaultModelId: data.default_model_id ?? null };
+  const loaded: ModelInfo[] = Array.isArray(data.models) ? data.models.filter((m: ModelInfo) => m.loaded) : [];
+  const models = pickOnePerRun(loaded);
+  const backendDefault: string | null = data.default_model_id ?? null;
+  const defaultModelId = models.some((m) => m.model_id === backendDefault)
+    ? backendDefault
+    : (models[0]?.model_id ?? null);
+  return { models, defaultModelId };
 };
 
 /**
