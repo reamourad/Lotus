@@ -92,6 +92,46 @@ const pickOnePerRun = (models: ModelInfo[]): ModelInfo[] => {
   return (measured.length > 0 ? measured : chosen).sort((a, b) => heldOutScore(b) - heldOutScore(a));
 };
 
+/**
+ * The strongest model of each architecture version, oldest version first.
+ * The comparison page wants exactly one v1, one v2 and one v3, no matter how
+ * many runs or folds of each happen to be loaded.
+ */
+export const bestPerVersion = (models: ModelInfo[]): ModelInfo[] => {
+  const best = new Map<string, ModelInfo>();
+  models.forEach((model) => {
+    const incumbent = best.get(model.version);
+    if (!incumbent || heldOutScore(model) > heldOutScore(incumbent)) {
+      best.set(model.version, model);
+    }
+  });
+  return Array.from(best.values()).sort((a, b) => a.version.localeCompare(b.version));
+};
+
+/**
+ * Asks one model to rank a pack. Returns the predictions already sorted by
+ * the backend, strongest pick first.
+ */
+export const fetchPredictions = async (
+  setCode: string,
+  pack: string[],
+  deck: string[],
+  modelId: string,
+  signal?: AbortSignal,
+): Promise<Array<{ card_name: string; probability: number }>> => {
+  const response = await fetch(`${API_BASE_URL}/predict`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ set: setCode, pack, deck, model: modelId }),
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Prediction failed for ${modelId} (HTTP status: ${response.status})`);
+  }
+  const data = await response.json();
+  return Array.isArray(data.predictions) ? data.predictions : [];
+};
+
 export const fetchModels = async (): Promise<{ models: ModelInfo[]; defaultModelId: string | null }> => {
   const response = await fetch('/api/models', { cache: 'no-store' });
   if (!response.ok) {
