@@ -39,6 +39,19 @@ const labelFor = (version: string) => VERSION_LABELS[version] ?? version.replace
 
 type Ranking = Map<string, { rank: number; probability: number }>;
 
+/**
+ * A model's confidence is a softmax over the pack, so its top pick can hold
+ * almost all of it and everything else lands far below a tenth of a percent.
+ * Scale the precision to the value so the low cards still say something.
+ */
+const formatPercent = (probability: number): string => {
+  const percent = probability * 100;
+  if (percent >= 10) return `${percent.toFixed(0)}%`;
+  if (percent >= 1) return `${percent.toFixed(1)}%`;
+  if (percent >= 0.01) return `${percent.toFixed(2)}%`;
+  return percent > 0 ? '<0.01%' : '0%';
+};
+
 interface ModelState {
   model: ModelInfo;
   ranking: Ranking | null;
@@ -65,6 +78,9 @@ export default function HobbitComparisonPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredCard, setHoveredCard] = useState<Card | null>(null);
+  // Which model's numbers are drawn on the cards. Clicking a model's box
+  // switches to it; clicking the selected one again clears the overlay.
+  const [shownModelId, setShownModelId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const models = useMemo(() => modelStates.map(state => state.model), [modelStates]);
@@ -88,6 +104,7 @@ export default function HobbitComparisonPage() {
           return;
         }
         setModelStates(chosen.map(model => ({ model, ranking: null, loading: true, error: null })));
+        setShownModelId(chosen[0].model_id);
         await loadPack();
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to start the comparison.');
@@ -220,8 +237,17 @@ export default function HobbitComparisonPage() {
             const colors = colorsFor(state.model.version);
             const top = topPickOf(state);
             const holdout = state.model.metrics?.holdout?.top_1_accuracy;
+            const isShown = state.model.model_id === shownModelId;
             return (
-              <div key={state.model.model_id} className="rounded-xl border border-gray-700 bg-gray-800/60 p-4">
+              <button
+                key={state.model.model_id}
+                type="button"
+                onClick={() => setShownModelId(isShown ? null : state.model.model_id)}
+                aria-pressed={isShown}
+                className={`rounded-xl border bg-gray-800/60 p-4 text-left transition-colors ${
+                  isShown ? `border-transparent ring-2 ${colors.ring}` : 'border-gray-700 hover:border-gray-500'
+                }`}
+              >
                 <div className="flex items-baseline justify-between">
                   <span className={`text-lg font-medium ${colors.text}`}>{labelFor(state.model.version)}</span>
                   {typeof holdout === 'number' && (
@@ -244,7 +270,10 @@ export default function HobbitComparisonPage() {
                     <p className="text-sm text-gray-500">no pick</p>
                   )}
                 </div>
-              </div>
+                <p className="mt-3 text-xs text-gray-500">
+                  {isShown ? 'Showing its numbers on the pack' : 'Click to show its numbers on the pack'}
+                </p>
+              </button>
             );
           })}
           {modelStates.length < 3 && (
@@ -282,10 +311,9 @@ export default function HobbitComparisonPage() {
         {/* The pack. Each card carries one badge per model showing that model's rank for it. */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
           {pack.map((card) => {
-            const badges = modelStates
-              .map(state => ({ state, entry: state.ranking?.get(card.name) }))
-              .filter(item => item.entry);
-            const isAnyTop = badges.some(item => item.entry!.rank === 1);
+            const shown = modelStates.find(state => state.model.model_id === shownModelId);
+            const entry = shown?.ranking?.get(card.name);
+            const isAnyTop = entry?.rank === 1;
             return (
               <button
                 key={card.id}
@@ -304,19 +332,18 @@ export default function HobbitComparisonPage() {
                   loading="lazy"
                   className="aspect-[5/7] w-full object-cover"
                 />
-                {/* Badges sit along the bottom so they never cover the card's
-                    own name, mana cost or art. */}
-                <div className="absolute inset-x-0 bottom-0 flex flex-wrap justify-center gap-1 bg-gray-950/80 px-1 py-1">
-                  {badges.map(({ state, entry }) => (
+                {/* The selected model's number, along the bottom so it never
+                    covers the card's own name, mana cost or art. */}
+                {shown && entry && (
+                  <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gray-950/80 px-1 py-1">
                     <span
-                      key={state.model.model_id}
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${colorsFor(state.model.version).badge}`}
-                      title={`${labelFor(state.model.version)} ranks this #${entry!.rank} at ${(entry!.probability * 100).toFixed(1)}%`}
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${colorsFor(shown.model.version).badge}`}
+                      title={`${labelFor(shown.model.version)} ranks this #${entry.rank}`}
                     >
-                      {labelFor(state.model.version)} #{entry!.rank}
+                      {labelFor(shown.model.version)} #{entry.rank} · {formatPercent(entry.probability)}
                     </span>
-                  ))}
-                </div>
+                  </div>
+                )}
               </button>
             );
           })}
