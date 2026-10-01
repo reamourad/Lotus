@@ -11,7 +11,7 @@ export const documents: DocumentItem[] = [
   {
     title: "Linux Foundations for CTFs",
     description:
-      "Class practice folders: navigation, find & grep, data processing, files & archives, and the final Ghost Drive challenge. Unzip it and start with README_FIRST.txt.",
+      "Your hands-on Linux practice pack: four practice rounds plus the final Ghost Drive challenge. Unzip it and open README_FIRST.txt to get started.",
     file: "linux_ctf_class.zip",
     size: "39 KB",
     type: "ZIP",
