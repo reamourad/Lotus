@@ -14,25 +14,33 @@ interface HeaderProps {
     activeTab?: string;
     boosterNumber?: number;
     pickNumber?: number;
+    showDraftStatus?: boolean;
 }
 
-export default function Header({ onSettingsClick, activeTab = "home", boosterNumber = 1, pickNumber = 1 }: HeaderProps) {
+export default function Header({ onSettingsClick, activeTab = "documents", boosterNumber = 1, pickNumber = 1, showDraftStatus = true }: HeaderProps) {
     return (
         <header className="flex items-center justify-between px-4 py-2 border-b border-border">
             <div className="flex items-center gap-3">
                 <Image src="/lotus_icon.png" alt="Logo" width={48} height={48} />
                 <span className={`${sorts_mill_goudy.className} text-2xl text-white`}>LOTUS</span>
-                <span className="italic text-yellow-500 ml-2" style={{ fontSize: '14px' }}>
-                    Booster {boosterNumber} / Pick {pickNumber}
-                </span>
+                {showDraftStatus && (
+                    <span className="italic text-yellow-500 ml-2" style={{ fontSize: '14px' }}>
+                        Booster {boosterNumber} / Pick {pickNumber}
+                    </span>
+                )}
             </div>
 
             <div className="flex items-center gap-4">
                 <Tabs variant="fill" value={activeTab}>
                 <Tabs.List stretch className="h-10">
-                    <Tabs.Trigger asChild value="home">
+                    <Tabs.Trigger asChild value="documents">
                         <Link href="/" className="px-4 py-2 text-base font-medium">
-                            Home
+                            Documents
+                        </Link>
+                    </Tabs.Trigger>
+                    <Tabs.Trigger asChild value="lotus">
+                        <Link href="/lotus" className="px-4 py-2 text-base font-medium">
+                            Lotus
                         </Link>
                     </Tabs.Trigger>
                     <Tabs.Trigger asChild value="sets">
