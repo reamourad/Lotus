@@ -16,4 +16,20 @@ export const documents: DocumentItem[] = [
     size: "39 KB",
     type: "ZIP",
   },
+  {
+    title: "Linux Workshop Slides",
+    description:
+      "The full slide deck from the Linux Fundamentals workshop: SSH, the filesystem, essential commands, Bash tricks and Vim.",
+    file: "Hexploit_Linux_Workshop.pdf",
+    size: "401 KB",
+    type: "PDF",
+  },
+  {
+    title: "Linux Class Cheat Sheet",
+    description:
+      "A two-page quick reference for the commands we cover in class. Handy to keep open while you practice.",
+    file: "Hexploit_Linux_Class_Cheat_Sheet_v3.pdf",
+    size: "17 KB",
+    type: "PDF",
+  },
 ];
